@@ -15,9 +15,9 @@ class PublicLedger(BaseModel):
 
     Attributes:
         id: UUID（主キー）
-        politician_id: 政治家ID
-        organization_id: 政治団体ID（政治資金の場合）
-        election_id: 選挙ID（選挙運動費用の場合）
+        ledger_type: 台帳種別（'political_fund' | 'election_fund'）
+        politician_organization_id: 政治家×政治団体の中間テーブルID
+        politician_election_id: 政治家×選挙の中間テーブルID
         fiscal_year: 会計年度
         total_income: 収入合計
         total_expense: 支出合計
@@ -30,9 +30,9 @@ class PublicLedger(BaseModel):
     """
 
     id: UUID
-    politician_id: UUID
-    organization_id: Optional[UUID] = None
-    election_id: Optional[UUID] = None
+    ledger_type: str
+    politician_organization_id: Optional[UUID] = None
+    politician_election_id: Optional[UUID] = None
     fiscal_year: int
     total_income: int = 0
     total_expense: int = 0

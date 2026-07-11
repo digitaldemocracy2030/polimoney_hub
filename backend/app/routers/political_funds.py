@@ -42,13 +42,13 @@ async def get_political_funds_by_ledger_id(
         HTTPException: 指定されたデータが見つからない場合
             - 404: 台帳が存在しない場合、または政治団体の台帳でない場合
     """
-    # 1. public_ledgersを取得（organization_idがNULLでないことを確認）
+    # 1. public_ledgersを取得（ledger_type='political_fund' であること）
     ledger_response = (
         supabase.table("public_ledgers")
         .select("*")
         .eq("id", str(ledger_id))
-        .not_.is_("organization_id", "null")
-        .single()
+        .eq("ledger_type", "political_fund")
+        .maybe_single()
         .execute()
     )
 
@@ -60,41 +60,47 @@ async def get_political_funds_by_ledger_id(
 
     ledger = PublicLedger(**ledger_response.data)
 
-    # 2. 政治家情報を取得
-    politician_response = (
-        supabase.table("politicians")
-        .select("id, name, name_kana")
-        .eq("id", str(ledger.politician_id))
-        .single()
+    # 2. 中間テーブル経由で政治家情報と政治団体情報を取得
+    pol_org_response = (
+        supabase.table("politician_organizations")
+        .select(
+            """
+            id,
+            politicians:politician_id(id, name, name_kana),
+            organizations:organization_id(id, name, type)
+            """
+        )
+        .eq("id", str(ledger.politician_organization_id))
+        .maybe_single()
         .execute()
     )
 
-    if not politician_response.data:
+    if not pol_org_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="政治家・政治団体情報が見つかりません",
+        )
+
+    pol_org_data = pol_org_response.data
+    politician_data = pol_org_data.get("politicians")
+    organization_data = pol_org_data.get("organizations")
+
+    if not politician_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="政治家情報が見つかりません",
         )
 
-    politician = schemas.PoliticianInfo(**politician_response.data)
-
-    # 3. 政治団体情報を取得
-    organization_response = (
-        supabase.table("organizations")
-        .select("id, name, type")
-        .eq("id", str(ledger.organization_id))
-        .single()
-        .execute()
-    )
-
-    if not organization_response.data:
+    if not organization_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="政治団体情報が見つかりません",
         )
 
-    organization = schemas.OrganizationInfo(**organization_response.data)
+    politician = schemas.PoliticianInfo(**politician_data)
+    organization = schemas.OrganizationInfo(**organization_data)
 
-    # 4. public_journalsを取得
+    # 3. public_journalsを取得
     journals_response = (
         supabase.table("public_journals")
         .select("*")
@@ -108,7 +114,7 @@ async def get_political_funds_by_ledger_id(
     else:
         journals_data = journals_response.data
 
-    # 5. account_codesを一括取得（必要なaccount_codeのリストを作成）
+    # 4. account_codesを一括取得（必要なaccount_codeのリストを作成）
     account_codes_list = [
         journal_data.get("account_code")
         for journal_data in journals_data
@@ -127,7 +133,7 @@ async def get_political_funds_by_ledger_id(
                 item["code"]: item["name"] for item in account_codes_response.data
             }
 
-    # 6. データを変換
+    # 5. データを変換
     data_items = []
     for journal_data in journals_data:
         journal = PublicJournal(**journal_data)
@@ -159,7 +165,7 @@ async def get_political_funds_by_ledger_id(
         )
         data_items.append(data_item)
 
-    # 7. サマリー情報を作成
+    # 6. サマリー情報を作成
     summary = schemas.PoliticalFundsSummary(
         total_income=ledger.total_income,
         total_expense=ledger.total_expense,
@@ -167,7 +173,7 @@ async def get_political_funds_by_ledger_id(
         journal_count=ledger.journal_count,
     )
 
-    # 8. メタ情報を作成
+    # 7. メタ情報を作成
     meta = schemas.PoliticalFundsMeta(
         api_version="v1",
         politician=politician,
@@ -176,5 +182,5 @@ async def get_political_funds_by_ledger_id(
         generated_at=datetime.now(),
     )
 
-    # 9. レスポンスを作成
+    # 8. レスポンスを作成
     return schemas.PoliticalFundsResponse(meta=meta, data=data_items)

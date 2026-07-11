@@ -56,13 +56,17 @@ def build_candidate_list_item(
     """Supabaseの台帳データを候補者一覧用レスポンスに変換する
 
     Args:
-        ledger_data: public_ledgers の行（politicians ネスト含む）
+        ledger_data: public_ledgers の行（politician_elections ネスト含む）
         public_expense_total: 公費負担合計
 
     Returns:
         schemas.CandidateListItem | None: 候補者一覧の1件。政治家情報が欠落時は None
     """
-    politician_data = ledger_data.get("politicians")
+    pol_elec_data = ledger_data.get("politician_elections")
+    if not pol_elec_data:
+        return None
+
+    politician_data = pol_elec_data.get("politicians")
     if not politician_data:
         return None
 
@@ -94,21 +98,25 @@ def build_elections_list_response(supabase: Client) -> schemas.ElectionsListResp
     Raises:
         HTTPException: データ取得に失敗した場合
     """
+    # 選挙台帳から中間テーブル経由で選挙情報を取得
     ledgers_response = (
         supabase.table("public_ledgers")
         .select(
             """
-            election_id,
-            elections:election_id(
-                id,
-                name,
-                type,
-                election_date,
-                district:districts(id, name)
+            politician_election_id,
+            politician_elections:politician_election_id(
+                election_id,
+                elections:election_id(
+                    id,
+                    name,
+                    type,
+                    election_date,
+                    district:districts(id, name)
+                )
             )
             """
         )
-        .not_.is_("election_id", "null")
+        .eq("ledger_type", "election_fund")
         .execute()
     )
 
@@ -120,7 +128,10 @@ def build_elections_list_response(supabase: Client) -> schemas.ElectionsListResp
 
     election_map: dict[str, dict] = {}
     for ledger in ledgers_response.data:
-        election_data = ledger.get("elections")
+        pol_elec = ledger.get("politician_elections")
+        if not pol_elec:
+            continue
+        election_data = pol_elec.get("elections")
         if election_data and election_data["id"] not in election_map:
             election_map[election_data["id"]] = election_data
 
@@ -157,14 +168,33 @@ def resolve_ledger_for_election(
     """
     assert_election_exists(supabase, election_id)
 
-    ledger_query = (
-        supabase.table("public_ledgers")
+    # 中間テーブルから該当する politician_election_id を検索
+    pe_query = (
+        supabase.table("politician_elections")
         .select("id, politician_id")
         .eq("election_id", str(election_id))
     )
 
     if politician_id is not None:
-        ledger_query = ledger_query.eq("politician_id", str(politician_id))
+        pe_query = pe_query.eq("politician_id", str(politician_id))
+
+    pe_response = pe_query.execute()
+
+    if not pe_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="選挙資金の台帳が見つかりません",
+        )
+
+    pe_ids = [pe["id"] for pe in pe_response.data]
+
+    # public_ledgers から該当する台帳を取得
+    ledger_query = (
+        supabase.table("public_ledgers")
+        .select("id, politician_election_id")
+        .in_("politician_election_id", pe_ids)
+        .eq("ledger_type", "election_fund")
+    )
 
     ledgers_response = ledger_query.execute()
 
@@ -183,15 +213,18 @@ def resolve_ledger_for_election(
         )
 
     if len(ledgers) > 1 and politician_id is None:
+        # 複数候補者の politician_id を取得
+        pe_map = {pe["id"]: pe["politician_id"] for pe in pe_response.data}
         raise MultipleCandidatesException(
             schemas.MultipleCandidatesError(
                 error="同一選挙に複数候補者が存在します。politician_id を指定してください。",
                 candidates=[
                     schemas.CandidateRef(
-                        politician_id=UUID(ledger["politician_id"]),
+                        politician_id=UUID(pe_map[ledger["politician_election_id"]]),
                         ledger_id=UUID(ledger["id"]),
                     )
                     for ledger in ledgers
+                    if ledger["politician_election_id"] in pe_map
                 ],
             )
         )
@@ -217,19 +250,40 @@ def build_election_candidates_response(
     """
     assert_election_exists(supabase, election_id)
 
+    # 中間テーブルから該当する politician_election を取得
+    pe_response = (
+        supabase.table("politician_elections")
+        .select("id")
+        .eq("election_id", str(election_id))
+        .execute()
+    )
+
+    if not pe_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="該当選挙の候補者が見つかりません",
+        )
+
+    pe_ids = [pe["id"] for pe in pe_response.data]
+
+    # public_ledgers から中間テーブル経由で政治家情報も取得
     ledgers_response = (
         supabase.table("public_ledgers")
         .select(
             """
             id,
-            politician_id,
             total_income,
             total_expense,
             journal_count,
-            politicians:politician_id(id, name, name_kana)
+            politician_elections:politician_election_id(
+                id,
+                politician_id,
+                politicians:politician_id(id, name, name_kana)
+            )
             """
         )
-        .eq("election_id", str(election_id))
+        .in_("politician_election_id", pe_ids)
+        .eq("ledger_type", "election_fund")
         .execute()
     )
 

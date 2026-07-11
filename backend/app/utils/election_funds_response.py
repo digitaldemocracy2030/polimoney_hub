@@ -124,7 +124,7 @@ def fetch_election_ledger_or_raise(
             detail=not_found_detail,
         )
 
-    if ledger_response.data.get("election_id") is None:
+    if ledger_response.data.get("ledger_type") != "election_fund":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=non_election_detail,
@@ -159,7 +159,7 @@ def build_election_funds_response_for_ledger(
     Args:
         supabase: Supabaseクライアント
         ledger_id: 台帳ID（public_ledgers.id）
-        ledger: 選挙台帳（election_id が設定済みであること）
+        ledger: 選挙台帳（politician_election_id が設定済みであること）
 
     Returns:
         schemas.ElectionFundsResponse: 選挙資金データ
@@ -167,37 +167,44 @@ def build_election_funds_response_for_ledger(
     Raises:
         HTTPException: 関連データが見つからない場合（404）
     """
-    politician_response = (
-        supabase.table("politicians")
-        .select("id, name, name_kana")
-        .eq("id", str(ledger.politician_id))
+    # 中間テーブル経由で政治家・選挙情報を取得
+    pol_elec_response = (
+        supabase.table("politician_elections")
+        .select(
+            """
+            id,
+            politicians:politician_id(id, name, name_kana),
+            elections:election_id(id, name, type, election_date, district_id)
+            """
+        )
+        .eq("id", str(ledger.politician_election_id))
         .maybe_single()
         .execute()
     )
 
-    if not politician_response.data:
+    if not pol_elec_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="政治家・選挙情報が見つかりません",
+        )
+
+    pol_elec_data = pol_elec_response.data
+    politician_data = pol_elec_data.get("politicians")
+    election_data = pol_elec_data.get("elections")
+
+    if not politician_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="政治家情報が見つかりません",
         )
 
-    politician = schemas.PoliticianInfo(**politician_response.data)
+    politician = schemas.PoliticianInfo(**politician_data)
 
-    election_response = (
-        supabase.table("elections")
-        .select("*")
-        .eq("id", str(ledger.election_id))
-        .maybe_single()
-        .execute()
-    )
-
-    if not election_response.data:
+    if not election_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="選挙情報が見つかりません",
         )
-
-    election_data = election_response.data
 
     district_response = (
         supabase.table("districts")
@@ -339,7 +346,7 @@ def fetch_election_ledger_for_response(
         supabase.table("public_ledgers")
         .select("*")
         .eq("id", str(ledger_id))
-        .not_.is_("election_id", "null")
+        .eq("ledger_type", "election_fund")
         .maybe_single()
         .execute()
     )

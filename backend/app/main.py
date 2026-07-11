@@ -1,12 +1,13 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import election_funds, health, polimoney, political_funds
+from app.database.supabase import get_admin_supabase_client_dep
+from app.routers import election_funds, health, polimoney, political_funds, sync
 from app.utils.polimoney_response import MultipleCandidatesException
 
 # Configure logging
@@ -164,6 +165,14 @@ app.include_router(
     polimoney.router,
     prefix="/api/v1",
     tags=["polimoney"],
+)
+
+# 同期API（Ledger → Hub）— admin権限が必要
+app.include_router(
+    sync.router,
+    prefix="/api/v1",
+    tags=["sync"],
+    dependencies=[Depends(get_admin_supabase_client_dep)],
 )
 
 

@@ -20,8 +20,7 @@ class PublicJournal(BaseModel):
         date: 日付
         description: 摘要（Polimoney: purpose）
         amount: 金額（Polimoney: price）
-        contact_name: 相手先名（匿名化済み）
-        contact_type: 相手先種別
+        contact_id: 関係者ID（public_contacts.id）
         account_code: 勘定科目コード
         classification: 活動区分（選挙台帳のみ: campaign/pre-campaign）
         non_monetary_basis: 金銭以外の寄附の見積根拠
@@ -39,8 +38,7 @@ class PublicJournal(BaseModel):
     date: Optional[str] = None
     description: Optional[str] = None
     amount: int
-    contact_name: Optional[str] = None
-    contact_type: Optional[str] = None
+    contact_id: Optional[UUID] = None
     account_code: Optional[str] = None
     classification: Optional[str] = None
     non_monetary_basis: Optional[str] = None

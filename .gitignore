@@ -2,6 +2,13 @@
 .env
 .env.local
 
+# Database backup (個人情報を含むためリポジトリに含めない)
+backup.sql
+*.dump
+
+# Supabase CLI (ローカル設定)
+supabase/.temp/
+
 # Deno
 .deno/
 
@@ -10,6 +17,7 @@
 .idea/
 *.swp
 *.swo
+*.code-workspace
 
 # OS
 .DS_Store
