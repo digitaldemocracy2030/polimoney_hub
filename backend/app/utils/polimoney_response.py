@@ -336,3 +336,171 @@ def build_election_candidates_response(
         data=candidates,
         total_count=len(candidates),
     )
+
+
+def build_politicians_list_response(
+    supabase: Client,
+) -> schemas.PoliticiansListResponse:
+    """収支データ公開済み政治家一覧レスポンスを組み立てる
+
+    public_ledgers（is_test=false）に紐づく政治家を重複なく返却する。
+    政党名は organizations（type='political_party'）から、
+    選挙区は最新の選挙から取得する。
+
+    Args:
+        supabase: Supabaseクライアント
+
+    Returns:
+        schemas.PoliticiansListResponse: 政治家一覧
+
+    Raises:
+        HTTPException: データ取得に失敗した場合
+    """
+    # 選挙台帳から政治家IDを収集
+    election_ledgers_response = (
+        supabase.table("public_ledgers")
+        .select(
+            """
+            id,
+            politician_elections:politician_election_id(
+                politician_id,
+                elections:election_id(
+                    election_date,
+                    district:districts(name)
+                )
+            )
+            """
+        )
+        .eq("ledger_type", "election_fund")
+        .eq("is_test", False)
+        .execute()
+    )
+
+    # 政治資金台帳から政治家IDを収集
+    political_ledgers_response = (
+        supabase.table("public_ledgers")
+        .select(
+            """
+            id,
+            politician_organizations:politician_organization_id(
+                politician_id
+            )
+            """
+        )
+        .eq("ledger_type", "political_fund")
+        .eq("is_test", False)
+        .execute()
+    )
+
+    # 政治家ごとの情報を集約
+    # politician_id -> { ledger_count, latest_district, latest_election_date }
+    politician_info: dict[str, dict] = {}
+
+    for ledger in (election_ledgers_response.data or []):
+        pol_elec = ledger.get("politician_elections")
+        if not pol_elec:
+            continue
+        pid = pol_elec.get("politician_id")
+        if not pid:
+            continue
+
+        info = politician_info.setdefault(pid, {
+            "ledger_count": 0,
+            "latest_district": None,
+            "latest_election_date": None,
+        })
+        info["ledger_count"] += 1
+
+        election_data = pol_elec.get("elections")
+        if election_data:
+            election_date = election_data.get("election_date")
+            if election_date and (
+                info["latest_election_date"] is None
+                or election_date > info["latest_election_date"]
+            ):
+                info["latest_election_date"] = election_date
+                district_data = election_data.get("district")
+                info["latest_district"] = (
+                    district_data.get("name") if district_data else None
+                )
+
+    for ledger in (political_ledgers_response.data or []):
+        pol_org = ledger.get("politician_organizations")
+        if not pol_org:
+            continue
+        pid = pol_org.get("politician_id")
+        if not pid:
+            continue
+
+        info = politician_info.setdefault(pid, {
+            "ledger_count": 0,
+            "latest_district": None,
+            "latest_election_date": None,
+        })
+        info["ledger_count"] += 1
+
+    if not politician_info:
+        return schemas.PoliticiansListResponse(data=[], total_count=0)
+
+    politician_ids = list(politician_info.keys())
+
+    # 政治家情報を取得
+    politicians_response = (
+        supabase.table("politicians")
+        .select("id, name, name_kana, title, image_url")
+        .in_("id", politician_ids)
+        .execute()
+    )
+
+    if politicians_response.data is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="政治家一覧の取得に失敗しました",
+        )
+
+    # 政党名を取得（politician_organizations -> organizations）
+    pol_orgs_response = (
+        supabase.table("politician_organizations")
+        .select(
+            """
+            politician_id,
+            organizations:organization_id(name, type)
+            """
+        )
+        .in_("politician_id", politician_ids)
+        .execute()
+    )
+
+    party_map: dict[str, str] = {}
+    for po in (pol_orgs_response.data or []):
+        pid = po.get("politician_id")
+        org = po.get("organizations")
+        if pid and org and org.get("type") == "political_party" and pid not in party_map:
+            party_map[pid] = org["name"]
+
+    # レスポンス組み立て
+    items: list[schemas.PoliticianListItem] = []
+    for pol in politicians_response.data:
+        pid = pol["id"]
+        info = politician_info.get(pid, {})
+        items.append(
+            schemas.PoliticianListItem(
+                id=UUID(pid),
+                name=pol["name"],
+                name_kana=pol.get("name_kana"),
+                title=pol.get("title"),
+                image_url=pol.get("image_url"),
+                party=party_map.get(pid),
+                district=info.get("latest_district"),
+                ledger_count=info.get("ledger_count", 0),
+            )
+        )
+
+    # 名前順でソート
+    items.sort(key=lambda p: p.name)
+
+    return schemas.PoliticiansListResponse(
+        data=items,
+        total_count=len(items),
+    )
+

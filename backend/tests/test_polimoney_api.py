@@ -337,3 +337,152 @@ class TestPolimoneyLedgerJournalsAPI:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "台帳が見つかりません"
+
+
+class TestPolimoneyPoliticiansAPI:
+    """政治家一覧APIのテスト"""
+
+    def test_returns_politicians_with_party_and_district(self):
+        mock_supabase = MagicMock()
+        call_count = {"value": 0}
+
+        def table_side_effect(name):
+            if name == "public_ledgers":
+                call_count["value"] += 1
+                if call_count["value"] == 1:
+                    # 選挙台帳
+                    return _chainable_query(
+                        [
+                            {
+                                "id": str(LEDGER_ID_1),
+                                "politician_elections": {
+                                    "politician_id": str(POLITICIAN_ID_1),
+                                    "elections": {
+                                        "election_date": "2026-01-01",
+                                        "district": {"name": "東京都第1区"},
+                                    },
+                                },
+                            },
+                        ]
+                    )
+                else:
+                    # 政治資金台帳
+                    return _chainable_query([])
+            if name == "politicians":
+                return _chainable_query(
+                    [
+                        {
+                            "id": str(POLITICIAN_ID_1),
+                            "name": "テスト太郎",
+                            "name_kana": "テストタロウ",
+                            "title": "AIエンジニア",
+                            "image_url": "https://example.com/photo.jpg",
+                        },
+                    ]
+                )
+            if name == "politician_organizations":
+                return _chainable_query(
+                    [
+                        {
+                            "politician_id": str(POLITICIAN_ID_1),
+                            "organizations": {
+                                "name": "未来創造党",
+                                "type": "political_party",
+                            },
+                        },
+                    ]
+                )
+            return MagicMock()
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        client = TestClient(_create_test_app(mock_supabase))
+        response = client.get("/api/v1/polimoney/politicians")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total_count"] == 1
+        assert body["api_version"] == "v1"
+
+        politician = body["data"][0]
+        assert politician["name"] == "テスト太郎"
+        assert politician["name_kana"] == "テストタロウ"
+        assert politician["title"] == "AIエンジニア"
+        assert politician["image_url"] == "https://example.com/photo.jpg"
+        assert politician["party"] == "未来創造党"
+        assert politician["district"] == "東京都第1区"
+        assert politician["ledger_count"] == 1
+
+    def test_returns_empty_list_when_no_public_data(self):
+        mock_supabase = MagicMock()
+        mock_supabase.table.return_value = _chainable_query([])
+
+        client = TestClient(_create_test_app(mock_supabase))
+        response = client.get("/api/v1/polimoney/politicians")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total_count"] == 0
+        assert body["data"] == []
+
+    def test_aggregates_ledger_count_from_both_types(self):
+        mock_supabase = MagicMock()
+        call_count = {"value": 0}
+
+        def table_side_effect(name):
+            if name == "public_ledgers":
+                call_count["value"] += 1
+                if call_count["value"] == 1:
+                    # 選挙台帳
+                    return _chainable_query(
+                        [
+                            {
+                                "id": str(LEDGER_ID_1),
+                                "politician_elections": {
+                                    "politician_id": str(POLITICIAN_ID_1),
+                                    "elections": {
+                                        "election_date": "2026-01-01",
+                                        "district": {"name": "東京都第1区"},
+                                    },
+                                },
+                            },
+                        ]
+                    )
+                else:
+                    # 政治資金台帳（同じ政治家）
+                    return _chainable_query(
+                        [
+                            {
+                                "id": str(LEDGER_ID_2),
+                                "politician_organizations": {
+                                    "politician_id": str(POLITICIAN_ID_1),
+                                },
+                            },
+                        ]
+                    )
+            if name == "politicians":
+                return _chainable_query(
+                    [
+                        {
+                            "id": str(POLITICIAN_ID_1),
+                            "name": "テスト太郎",
+                            "name_kana": None,
+                            "title": None,
+                            "image_url": None,
+                        },
+                    ]
+                )
+            if name == "politician_organizations":
+                return _chainable_query([])
+            return MagicMock()
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        client = TestClient(_create_test_app(mock_supabase))
+        response = client.get("/api/v1/polimoney/politicians")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total_count"] == 1
+        assert body["data"][0]["ledger_count"] == 2
+

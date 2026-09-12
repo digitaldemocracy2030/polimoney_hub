@@ -18,10 +18,35 @@ from app.utils.election_funds_response import (
 from app.utils.polimoney_response import (
     build_election_candidates_response,
     build_elections_list_response,
+    build_politicians_list_response,
     resolve_ledger_for_election,
 )
 
 router = APIRouter(prefix="/polimoney")
+
+
+@router.get(
+    "/politicians",
+    response_model=schemas.PoliticiansListResponse,
+)
+async def get_polimoney_politicians(
+    supabase: Client = Depends(get_supabase_client_dep),
+):
+    """収支データが公開されている政治家の一覧を取得する
+
+    public_ledgers（is_test=false）に紐づく政治家のみ返却する。
+    政党名・選挙区名・公開台帳数を含む。
+
+    Args:
+        supabase: Supabaseクライアント
+
+    Returns:
+        schemas.PoliticiansListResponse: 政治家一覧
+
+    Raises:
+        HTTPException: データ取得に失敗した場合
+    """
+    return build_politicians_list_response(supabase)
 
 
 @router.get(

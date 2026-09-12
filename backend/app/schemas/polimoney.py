@@ -98,3 +98,42 @@ class MultipleCandidatesError(BaseModel):
 
     error: str
     candidates: list[CandidateRef]
+
+
+class PoliticianListItem(BaseModel):
+    """政治家一覧の1件
+
+    Attributes:
+        id: 政治家ID
+        name: 氏名
+        name_kana: 氏名（カナ）
+        title: 肩書き
+        image_url: プロフィール画像URL
+        party: 政党名
+        district: 選挙区名
+        ledger_count: 公開台帳数
+    """
+
+    id: UUID
+    name: str
+    name_kana: Optional[str] = None
+    title: Optional[str] = None
+    image_url: Optional[str] = None
+    party: Optional[str] = None
+    district: Optional[str] = None
+    ledger_count: int = 0
+
+
+class PoliticiansListResponse(BaseModel):
+    """政治家一覧レスポンス
+
+    Attributes:
+        api_version: APIバージョン
+        data: 政治家一覧
+        total_count: 件数
+    """
+
+    api_version: str = "v1"
+    data: list[PoliticianListItem]
+    total_count: int
+
