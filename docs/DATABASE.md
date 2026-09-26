@@ -39,6 +39,9 @@ Polimoney Hub は、政治資金の透明性を実現するための **共通マ
 | `organization_manager_verifications` | **【v2 追加】政治団体管理者認証申請**   | -           |
 | `organization_managers`              | **【v2 追加】政治団体管理者マッピング** | -           |
 | `impersonation_reports`              | **【v2 追加】なりすまし通報**           | -           |
+| `politician_organizations`           | **【v2 追加】政治家-団体リンク**        | -           |
+| `politician_elections`               | **【v2 追加】政治家-選挙リンク**        | -           |
+| `public_contacts`                    | **【v2 追加】公開関係者**               | -           |
 
 ---
 
@@ -839,6 +842,59 @@ SUPABASE_SECRET_KEY=eyJhbGci...
 API_KEY_PROD=your-production-api-key
 API_KEY_DEV=your-development-api-key
 ```
+
+---
+
+## politician_organizations（政治家-団体リンク）【v2 追加】
+
+政治家と政治団体の関連を管理するテーブル。
+
+| カラム名          | 型             | NULL | デフォルト         | 説明                                     |
+| ----------------- | -------------- | ---- | ------------------ | ---------------------------------------- |
+| `id`              | uuid           | NO   | gen_random_uuid()  | PK                                       |
+| `politician_id`   | uuid           | NO   | -                  | FK → politicians.id                      |
+| `organization_id` | uuid           | NO   | -                  | FK → organizations.id                    |
+| `role`            | varchar        | YES  | 'representative'   | 役割（代表者、会計責任者等）             |
+| `is_active`       | boolean        | YES  | true               | 現在有効か                               |
+| `created_at`      | timestamptz    | YES  | now()              | 作成日時                                 |
+| `updated_at`      | timestamptz    | YES  | now()              | 更新日時                                 |
+
+---
+
+## politician_elections（政治家-選挙リンク）【v2 追加】
+
+政治家と選挙の関連を管理するテーブル。
+
+| カラム名        | 型             | NULL | デフォルト         | 説明                                     |
+| --------------- | -------------- | ---- | ------------------ | ---------------------------------------- |
+| `id`            | uuid           | NO   | gen_random_uuid()  | PK                                       |
+| `politician_id` | uuid           | NO   | -                  | FK → politicians.id                      |
+| `election_id`   | uuid           | NO   | -                  | FK → elections.id                        |
+| `created_at`    | timestamptz    | YES  | now()              | 作成日時                                 |
+
+---
+
+## public_contacts（公開関係者）【v2 追加】
+
+Ledger から同期された関係者情報の公開版。プライバシー制御カラム付き。
+
+| カラム名                 | 型             | NULL | デフォルト         | 説明                                     |
+| ------------------------ | -------------- | ---- | ------------------ | ---------------------------------------- |
+| `id`                     | uuid           | NO   | gen_random_uuid()  | PK                                       |
+| `ledger_id`              | uuid           | NO   | -                  | FK → public_ledgers.id                   |
+| `contact_source_id`      | uuid           | NO   | -                  | Ledger 側の contacts.id                  |
+| `contact_type`           | varchar        | NO   | -                  | 関係者種別                               |
+| `name`                   | text           | YES  | -                  | 氏名                                     |
+| `address`                | text           | YES  | -                  | 住所                                     |
+| `occupation`             | text           | YES  | -                  | 職業                                     |
+| `is_name_private`        | boolean        | NO   | false              | 氏名非公開フラグ                         |
+| `is_address_private`     | boolean        | NO   | false              | 住所非公開フラグ                         |
+| `is_occupation_private`  | boolean        | NO   | false              | 職業非公開フラグ                         |
+| `privacy_reason_type`    | varchar        | YES  | -                  | 非公開理由の種別                         |
+| `privacy_reason_other`   | text           | YES  | -                  | 非公開理由（その他）                     |
+| `hub_organization_id`    | uuid           | YES  | -                  | FK → organizations.id                    |
+| `synced_at`              | timestamptz    | NO   | now()              | Ledger からの同期日時                    |
+| `created_at`             | timestamptz    | YES  | now()              | 作成日時                                 |
 
 ---
 
