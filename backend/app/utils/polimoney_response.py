@@ -459,15 +459,19 @@ def build_politicians_list_response(
         )
 
     # 政党名を取得（politician_organizations -> organizations）
+    # is_active=true のみ取得し、updated_at DESC で最新の所属を優先する
     pol_orgs_response = (
         supabase.table("politician_organizations")
         .select(
             """
             politician_id,
+            updated_at,
             organizations:organization_id(name, type)
             """
         )
         .in_("politician_id", politician_ids)
+        .eq("is_active", True)
+        .order("updated_at", desc=True)
         .execute()
     )
 
@@ -475,6 +479,7 @@ def build_politicians_list_response(
     for po in (pol_orgs_response.data or []):
         pid = po.get("politician_id")
         org = po.get("organizations")
+        # updated_at DESC でソート済みなので、最初に見つかったものが最新の所属
         if pid and org and org.get("type") == "political_party" and pid not in party_map:
             party_map[pid] = org["name"]
 

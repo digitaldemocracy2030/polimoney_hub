@@ -343,6 +343,7 @@ class TestPolimoneyPoliticiansAPI:
     """政治家一覧APIのテスト"""
 
     def test_returns_politicians_with_party_and_district(self):
+        """政治家一覧が政党名・選挙区名を含んで正しく返されることを検証する"""
         mock_supabase = MagicMock()
         call_count = {"value": 0}
 
@@ -414,6 +415,7 @@ class TestPolimoneyPoliticiansAPI:
         assert politician["ledger_count"] == 1
 
     def test_returns_empty_list_when_no_public_data(self):
+        """公開データが存在しない場合に空配列が返されることを検証する"""
         mock_supabase = MagicMock()
         mock_supabase.table.return_value = _chainable_query([])
 
@@ -426,6 +428,7 @@ class TestPolimoneyPoliticiansAPI:
         assert body["data"] == []
 
     def test_aggregates_ledger_count_from_both_types(self):
+        """選挙台帳と政治資金台帳の合計台帳数が正しく集計されることを検証する"""
         mock_supabase = MagicMock()
         call_count = {"value": 0}
 
