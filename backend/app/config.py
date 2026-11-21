@@ -30,6 +30,14 @@ class Settings(BaseSettings):
         None, env="SUPABASE_PUBLISHABLE_KEY"
     )
 
+    # Ledger 専用の同期 API キー（app/core/api_key.py）
+    ledger_sync_api_key_prod: Optional[str] = Field(
+        None, env="LEDGER_SYNC_API_KEY_PROD"
+    )
+    ledger_sync_api_key_dev: Optional[str] = Field(
+        None, env="LEDGER_SYNC_API_KEY_DEV"
+    )
+
     class Config:
         """Pydantic設定
 

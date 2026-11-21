@@ -201,7 +201,7 @@ Polimoney (可視化) / 他の消費者
 
 | 通信経路               | 認証方式             | 説明                                    |
 | ---------------------- | -------------------- | --------------------------------------- |
-| Ledger → Hub API       | `X-API-Key` ヘッダー | 環境変数 `API_KEY_PROD` / `API_KEY_DEV` |
+| Ledger → Hub API       | `X-API-Key` ヘッダー | 環境変数 `LEDGER_SYNC_API_KEY_PROD` / `LEDGER_SYNC_API_KEY_DEV` |
 | Hub Admin UI → Hub API | Bearer Token (JWT)   | 🅱️ Supabase B の Auth で発行            |
 | Ledger UI → Ledger API | Bearer Token (JWT)   | 🅰️ Supabase A の Auth で発行            |
 
@@ -261,8 +261,8 @@ SUPABASE_PUBLISHABLE_KEY=eyJhbGci...  # クライアント用
 SUPABASE_SECRET_KEY=eyJhbGci...       # サーバー用（公開厳禁）
 
 # API 認証キー（Ledger/Polimoney からのアクセス用）
-API_KEY_PROD=your-production-api-key
-API_KEY_DEV=your-development-api-key
+LEDGER_SYNC_API_KEY_PROD=your-production-api-key
+LEDGER_SYNC_API_KEY_DEV=your-development-api-key
 ```
 
 ---

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.database.supabase import get_admin_supabase_client_dep
+from app.core.api_key import require_ledger_sync_key
 from app.routers import election_funds, health, polimoney, political_funds, sync
 from app.utils.polimoney_response import MultipleCandidatesException
 
@@ -167,12 +167,12 @@ app.include_router(
     tags=["polimoney"],
 )
 
-# 同期API（Ledger → Hub）— admin権限が必要
+# 同期API（Ledger → Hub）— Ledger 専用 API キーが必要（app/core/api_key.py）
 app.include_router(
     sync.router,
     prefix="/api/v1",
     tags=["sync"],
-    dependencies=[Depends(get_admin_supabase_client_dep)],
+    dependencies=[Depends(require_ledger_sync_key)],
 )
 
 
