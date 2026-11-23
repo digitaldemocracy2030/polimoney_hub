@@ -127,3 +127,51 @@ def test_dev_key_can_update_test_ledger(keys, client):
     res = client.post("/api/v1/sync/ledger", json=LEDGER_BODY, headers={"X-API-Key": DEV_KEY})
     assert res.status_code == 200
     assert res.json()["action"] == "updated"
+
+
+# ============================================
+# 変更ログ（ledger_change_logs は public_ledgers.id に紐付く）
+# ============================================
+
+CHANGE_LOG_BODY = {
+    "ledger_source_id": "ledger-1",
+    "change_summary": "仕訳 2 件を同期",
+    "change_details": {"journals": 2},
+}
+
+
+def _fake_change_log_supabase(ledgers):
+    client = MagicMock()
+    tables = {"public_ledgers": MagicMock(), "ledger_change_logs": MagicMock()}
+    client.table.side_effect = lambda name: tables[name]
+    select = tables["public_ledgers"].select.return_value.eq.return_value.limit.return_value
+    select.execute.return_value = MagicMock(data=ledgers)
+    return client, tables
+
+
+def test_change_log_records_with_public_ledger_id(keys, client):
+    fake, tables = _fake_change_log_supabase([{"id": "hub-ledger-1", "is_test": False}])
+    _use_supabase(fake)
+    res = client.post("/api/v1/sync/change-log", json=CHANGE_LOG_BODY, headers={"X-API-Key": PROD_KEY})
+    assert res.status_code == 200
+    inserted = tables["ledger_change_logs"].insert.call_args.args[0]
+    assert inserted["ledger_id"] == "hub-ledger-1"
+    assert inserted["changed_at"]
+    assert inserted["change_summary"] == "仕訳 2 件を同期"
+    assert "ledger_source_id" not in inserted
+
+
+def test_change_log_404_when_ledger_not_synced(keys, client):
+    fake, tables = _fake_change_log_supabase([])
+    _use_supabase(fake)
+    res = client.post("/api/v1/sync/change-log", json=CHANGE_LOG_BODY, headers={"X-API-Key": PROD_KEY})
+    assert res.status_code == 404
+    tables["ledger_change_logs"].insert.assert_not_called()
+
+
+def test_change_log_dev_key_cannot_write_production_ledger(keys, client):
+    fake, tables = _fake_change_log_supabase([{"id": "hub-ledger-1", "is_test": False}])
+    _use_supabase(fake)
+    res = client.post("/api/v1/sync/change-log", json=CHANGE_LOG_BODY, headers={"X-API-Key": DEV_KEY})
+    assert res.status_code == 403
+    tables["ledger_change_logs"].insert.assert_not_called()
