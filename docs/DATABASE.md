@@ -561,15 +561,21 @@ Ledger ユーザーからの政治団体管理者認証申請を管理。
 
 ### マスタ取得（認証必要）
 
+現在の実装（FastAPI, `backend/`）。`/api/v1/*` はすべて Ledger 専用 API キー（`X-API-Key`）が必要。
+DB は service_role で読み、公開読み取りの RLS ポリシーは `db/migrate-restrict-public-read.sql` で削除する。
+
 ```
-GET /api/v1/municipalities          # 市区町村一覧
-GET /api/v1/districts               # 選挙区一覧
-GET /api/v1/elections               # 選挙一覧
-GET /api/v1/politicians             # 政治家一覧
-GET /api/v1/organizations           # 政治団体一覧
-GET /api/v1/master/account-codes    # 勘定科目一覧
-GET /api/v1/master/election-types   # 選挙タイプ一覧
+GET  /api/v1/elections                              # 有効な選挙一覧
+GET  /api/v1/politicians?ledger_user_id=            # Ledger ユーザーに紐づく政治家
+GET  /api/v1/organizations                          # 有効な政治団体一覧
+GET  /api/v1/organizations/managed?ledger_user_id=  # Ledger ユーザーが管理者の政治団体
+GET  /api/v1/organizations/:id                      # 政治団体 1 件
+POST /api/v1/politician-elections                   # 政治家 ↔ 選挙の紐付けを取得・作成
+POST /api/v1/politician-organizations/resolve       # 政治団体の代表者の紐付けを引く
+GET  /api/v1/master/account-codes                   # 勘定科目一覧
 ```
+
+市区町村・選挙区・選挙タイプの API は未実装。
 
 ### 公開データ取得（認証必要）
 
@@ -773,14 +779,8 @@ Hub は API キーに基づいて `is_test` フィルタリングを行います
 | `LEDGER_SYNC_API_KEY_PROD` | `false`      | `is_test = false` |
 | `LEDGER_SYNC_API_KEY_DEV`  | `true`       | `is_test = true`  |
 
-```typescript
-// Hub middleware/auth.ts
-if (apiKey === apiKeyDev) {
-  c.set("isTestMode", true); // テストデータを返す
-} else if (apiKey === apiKeyProd) {
-  c.set("isTestMode", false); // 本番データを返す
-}
-```
+実装は `backend/app/core/api_key.py`（キーの判定）と `backend/app/utils/test_scope.py`（絞り込み）。
+PROD キーでは `is_test` が false または NULL の行を返す。
 
 ```sql
 -- 各 API でのクエリ例

@@ -201,7 +201,7 @@ Polimoney (可視化) / 他の消費者
 
 | 通信経路               | 認証方式             | 説明                                    |
 | ---------------------- | -------------------- | --------------------------------------- |
-| Ledger → Hub API       | `X-API-Key` ヘッダー | 環境変数 `LEDGER_SYNC_API_KEY_PROD` / `LEDGER_SYNC_API_KEY_DEV` |
+| Ledger → Hub API       | `X-API-Key` ヘッダー | 環境変数 `LEDGER_SYNC_API_KEY_PROD` / `LEDGER_SYNC_API_KEY_DEV`。一般公開用キーができるまで `/api/v1/*` はすべてこのキーが必要（`/health` のみ不要） |
 | Hub Admin UI → Hub API | Bearer Token (JWT)   | 🅱️ Supabase B の Auth で発行            |
 | Ledger UI → Ledger API | Bearer Token (JWT)   | 🅰️ Supabase A の Auth で発行            |
 
@@ -240,7 +240,7 @@ Polimoney Hub
 | 通信            | 認証方式                               |
 | --------------- | -------------------------------------- |
 | Ledger → Hub    | API Key (`X-API-Key` ヘッダー)         |
-| Polimoney → Hub | API Key (`X-API-Key` ヘッダー)         |
+| Polimoney → Hub | API Key（一般公開用キーは未実装。現状 `/api/v1/*` は Ledger 専用キーのみ） |
 | Hub → Supabase  | Service Role Key（サーバーサイドのみ） |
 
 ### 管理画面認証（Supabase Auth）
