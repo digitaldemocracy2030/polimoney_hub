@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, model_validator
 from supabase import Client
 
+from app.core.api_key import LedgerSyncCaller, require_ledger_sync_key
 from app.database.supabase import get_admin_supabase_client_dep
 
 router = APIRouter()
@@ -218,6 +219,7 @@ class SyncJournalResult(BaseModel):
 async def sync_journals(
     request: SyncJournalsRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
+    caller: LedgerSyncCaller = Depends(require_ledger_sync_key),
 ):
     """仕訳データを Ledger から Hub に同期する
 
@@ -238,7 +240,7 @@ async def sync_journals(
             # 既存レコードを検索
             existing = (
                 supabase.table("public_journals")
-                .select("id, content_hash")
+                .select("id, content_hash, is_test")
                 .eq("journal_source_id", journal.journal_source_id)
                 .maybe_single()
                 .execute()
@@ -277,6 +279,16 @@ async def sync_journals(
                 "is_test": journal.is_test,
                 "synced_at": _utc_now(),
             }
+
+            # DEV キーはテストデータとしてのみ書き込める（本番データは上書きさせない）
+            if caller.is_test_key:
+                record["is_test"] = True
+                if existing and existing.data and not existing.data.get("is_test"):
+                    print(
+                        f"[Sync] DEV key cannot overwrite production journal {journal.journal_source_id}"
+                    )
+                    result.errors += 1
+                    continue
 
             if existing and existing.data:
                 # ハッシュが同じならスキップ
@@ -346,6 +358,7 @@ class SyncLedgerRequest(BaseModel):
 async def sync_ledger(
     request: SyncLedgerRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
+    caller: LedgerSyncCaller = Depends(require_ledger_sync_key),
 ):
     """台帳データを Ledger から Hub に同期する
 
@@ -363,7 +376,7 @@ async def sync_ledger(
     # 既存レコードを検索
     existing = (
         supabase.table("public_ledgers")
-        .select("id")
+        .select("id, is_test")
         .eq("ledger_source_id", ledger.ledger_source_id)
         .maybe_single()
         .execute()
@@ -381,6 +394,15 @@ async def sync_ledger(
         "is_test": ledger.is_test,
         "last_updated_at": _utc_now(),
     }
+
+    # DEV キーはテストデータとしてのみ書き込める（本番データは上書きさせない）
+    if caller.is_test_key:
+        record["is_test"] = True
+        if existing and existing.data and not existing.data.get("is_test"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="開発用の API キーでは本番データを更新できません",
+            )
 
     if existing and existing.data:
         # 更新

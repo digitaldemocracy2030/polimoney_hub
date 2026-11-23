@@ -770,8 +770,8 @@ Hub は API キーに基づいて `is_test` フィルタリングを行います
 
 | API キー       | `isTestMode` | 返却データ        |
 | -------------- | ------------ | ----------------- |
-| `API_KEY_PROD` | `false`      | `is_test = false` |
-| `API_KEY_DEV`  | `true`       | `is_test = true`  |
+| `LEDGER_SYNC_API_KEY_PROD` | `false`      | `is_test = false` |
+| `LEDGER_SYNC_API_KEY_DEV`  | `true`       | `is_test = true`  |
 
 ```typescript
 // Hub middleware/auth.ts
@@ -839,8 +839,8 @@ SUPABASE_PUBLISHABLE_KEY=eyJhbGci...
 SUPABASE_SECRET_KEY=eyJhbGci...
 
 # API 認証キー（Ledger/Polimoney からのアクセス用）
-API_KEY_PROD=your-production-api-key
-API_KEY_DEV=your-development-api-key
+LEDGER_SYNC_API_KEY_PROD=your-production-api-key
+LEDGER_SYNC_API_KEY_DEV=your-development-api-key
 ```
 
 ---
