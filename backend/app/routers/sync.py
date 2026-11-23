@@ -481,12 +481,48 @@ class ChangeLogInput(BaseModel):
 async def record_change_log(
     data: ChangeLogInput,
     supabase: Client = Depends(get_admin_supabase_client_dep),
+    caller: LedgerApiCaller = Depends(require_ledger_api_key),
 ):
-    """変更ログを記録する"""
+    """変更ログを記録する
+
+    ledger_change_logs は公開台帳（public_ledgers.id）に紐付くため、
+    ledger_source_id（Ledger の台帳 ID）から公開台帳を引いて記録する。
+    公開台帳が無ければ 404（先に /sync/ledger で同期すること）。
+    DEV キーでは本番データ（is_test=false）の台帳に記録できない（403）。
+    """
+    try:
+        ledgers = (
+            supabase.table("public_ledgers")
+            .select("id, is_test")
+            .eq("ledger_source_id", data.ledger_source_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+    except Exception as e:
+        print(f"[Sync] Error fetching ledger for change log: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="変更ログの記録に失敗しました",
+        )
+
+    if not ledgers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="公開台帳が見つかりません（先に台帳を同期してください）",
+        )
+    ledger = ledgers[0]
+    if caller.is_test_key and not ledger.get("is_test"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="開発用の API キーでは本番データに変更ログを記録できません",
+        )
+
     try:
         supabase.table("ledger_change_logs").insert(
             {
-                "ledger_source_id": data.ledger_source_id,
+                "ledger_id": ledger["id"],
+                "changed_at": _utc_now(),
                 "change_summary": data.change_summary,
                 "change_details": data.change_details,
             }
@@ -495,7 +531,7 @@ async def record_change_log(
         print(f"[Sync] Error recording change log: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"変更ログの記録に失敗しました: {e}",
+            detail="変更ログの記録に失敗しました",
         )
 
     return {"status": "ok"}
