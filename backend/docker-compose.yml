@@ -9,7 +9,7 @@ services:
       ENV: development
       DEBUG: "True"
     ports:
-      - "8000:8000"
+      - "3722:8000"  # ローカルは 3722（コンテナ内は本番と同じ 8000）
     volumes:
       - .:/app
     restart: unless-stopped
