@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.core.api_key import require_ledger_sync_key
-from app.routers import election_funds, health, polimoney, political_funds, sync
+from app.routers import election_funds, health, master, polimoney, political_funds, sync
 from app.utils.polimoney_response import MultipleCandidatesException
 
 # Configure logging
@@ -165,6 +165,14 @@ app.include_router(
     polimoney.router,
     prefix="/api/v1",
     tags=["polimoney"],
+)
+
+# マスタデータAPI（勘定科目など）— 読み取り専用。一般公開まではLedger 専用 API キーが必要
+app.include_router(
+    master.router,
+    prefix="/api/v1",
+    tags=["master"],
+    dependencies=[Depends(require_ledger_sync_key)],
 )
 
 # 同期API（Ledger → Hub）— Ledger 専用 API キーが必要（app/core/api_key.py）

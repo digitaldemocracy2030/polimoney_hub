@@ -1,14 +1,16 @@
 """Ledger 専用 API キー認証
 
-同期 API（/api/v1/sync/*）は公開データを書き込むため、Ledger からの呼び出しだけを受け付ける。
-Ledger は X-API-Key ヘッダーにキーを付けて呼ぶ。
+次の API は Ledger からの呼び出しだけを受け付ける。Ledger は X-API-Key ヘッダーにキーを付けて呼ぶ。
+
+- 同期 API（/api/v1/sync/*）: 公開データを書き込むため
+- マスタ API（/api/v1/master/*）: まだ一般公開しないため
 
 - LEDGER_SYNC_API_KEY_PROD: 本番データ用
 - LEDGER_SYNC_API_KEY_DEV: テストデータ用。このキーで送られたデータは常に is_test=true として扱い、
   本番データ（is_test=false）の上書きは拒否する
 
 どちらも未設定の場合は、設定漏れで書き込み口が開いたままにならないよう 503 を返す。
-公開の読み取り API とは別のキーとして扱う（読み取り API には付けない）。
+将来の一般公開用 API キーとは別のキーとして扱う。
 """
 
 import hmac
