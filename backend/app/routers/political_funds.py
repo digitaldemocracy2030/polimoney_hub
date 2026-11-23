@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
 from app import schemas
-from app.database.supabase import get_supabase_client_dep
+from app.database.supabase import get_admin_supabase_client_dep
 from app.models.public_journals import PublicJournal
 from app.models.public_ledgers import PublicLedger
 from app.utils.category import derive_category, get_category_name
@@ -24,7 +24,7 @@ router = APIRouter()
 )
 async def get_political_funds_by_ledger_id(
     ledger_id: UUID,
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """指定した台帳IDの政治資金データを取得する
 

@@ -94,6 +94,34 @@ FastAPIにより自動生成されるAPIドキュメント：
 - ReDoc: `http://localhost:8000/redoc`
 - OpenAPI Schema: `http://localhost:8000/openapi.json`
 
+## API エンドポイント
+
+一般公開用の API キーの仕組みができるまで、`/api/v1/*` はすべて **Ledger 専用 API キー**（`X-API-Key` ヘッダー）が必要（`app/core/api_key.py`）。認証不要なのは `/health` だけ。
+
+| 環境変数                   | 扱うデータ                              |
+| -------------------------- | --------------------------------------- |
+| `LEDGER_SYNC_API_KEY_PROD` | 本番データ（`is_test` が false / NULL） |
+| `LEDGER_SYNC_API_KEY_DEV`  | テストデータ（`is_test = true`）        |
+
+キーが無い・違う場合は 401、どちらのキーも未設定なら 503。DB は service_role（`SUPABASE_SECRET_KEY`）で読む（公開読み取りの RLS ポリシーは `db/migrate-restrict-public-read.sql` で削除する）。
+
+| メソッド・パス                                      | 内容                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET /api/v1/political-funds/{ledger_id}`           | 政治資金収支報告書のデータ                                                                  |
+| `GET /api/v1/election-funds/{ledger_id}`            | 選挙運動費用収支報告書のデータ                                                              |
+| `GET /api/v1/polimoney/*`                           | Polimoney 向けの公開データ                                                                  |
+| `GET /api/v1/master/account-codes[/{code}]`         | 勘定科目                                                                                    |
+| `GET /api/v1/politicians?ledger_user_id=`           | Ledger ユーザーに紐づく政治家                                                               |
+| `GET /api/v1/organizations`                         | 有効な政治団体（名前順）                                                                    |
+| `GET /api/v1/organizations/managed?ledger_user_id=` | Ledger ユーザーが管理者の政治団体（`manager_verified_at` / `manager_verified_domain` 付き） |
+| `GET /api/v1/organizations/{id}`                    | 政治団体 1 件                                                                               |
+| `GET /api/v1/elections`                             | 有効な選挙（投票日の新しい順）                                                              |
+| `POST /api/v1/politician-elections`                 | 政治家 ↔ 選挙の紐付けを取得・作成（本人確認済みの政治家本人のみ）                          |
+| `POST /api/v1/politician-organizations/resolve`     | 政治団体の代表者の紐付けを引く（作成はしない）                                              |
+| `POST /api/v1/sync/*`, `GET /api/v1/sync/status`    | Ledger → Hub の公開データ同期                                                               |
+
+政治家・政治団体・選挙・政治団体管理者は、API キーに応じて本番データかテストデータのどちらかだけを扱う（`app/utils/test_scope.py`）。
+
 ## テスト実行
 
 ```bash

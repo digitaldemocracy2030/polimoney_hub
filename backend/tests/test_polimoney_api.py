@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
-from app.database.supabase import get_supabase_client_dep
+from app.database.supabase import get_admin_supabase_client_dep
 from app.routers import polimoney
 from app.utils.election_funds_response import sum_public_expense_by_ledger
 from app.utils.polimoney_response import MultipleCandidatesException
@@ -67,7 +67,7 @@ def _create_test_app(mock_supabase: MagicMock) -> FastAPI:
         )
 
     test_app.include_router(polimoney.router, prefix="/api/v1")
-    test_app.dependency_overrides[get_supabase_client_dep] = lambda: mock_supabase
+    test_app.dependency_overrides[get_admin_supabase_client_dep] = lambda: mock_supabase
     return test_app
 
 
