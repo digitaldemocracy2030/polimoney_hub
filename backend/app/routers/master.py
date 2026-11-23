@@ -1,7 +1,7 @@
 """マスタデータ API
 
 勘定科目などの共通マスタを返す読み取り専用 API。
-一般公開するまでは Ledger 専用 API キーが必要（main.py で require_ledger_sync_key を指定）。
+一般公開するまでは Ledger 専用 API キーが必要（main.py で /api/v1 の全ルーターに require_ledger_api_key を指定）。
 Ledger は仕訳入力と Hub 同期でこの勘定科目を使う。
 """
 
@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
-from app.database.supabase import get_supabase_client_dep
+from app.database.supabase import get_admin_supabase_client_dep
 from app.schemas.master import (
     AccountCodeResponse,
     AccountCodesResponse,
@@ -32,7 +32,7 @@ async def list_account_codes(
     ledger_type: Optional[AccountLedgerType] = None,
     type: Optional[AccountType] = None,
     report_category: Optional[str] = None,
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """有効な勘定科目の一覧を表示順で返す
 
@@ -70,7 +70,7 @@ async def list_account_codes(
 @router.get("/account-codes/{code}", response_model=AccountCodeResponse)
 async def get_account_code(
     code: str,
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """勘定科目を 1 件返す
 

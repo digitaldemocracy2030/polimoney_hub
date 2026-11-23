@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, model_validator
 from supabase import Client
 
-from app.core.api_key import LedgerSyncCaller, require_ledger_sync_key
+from app.core.api_key import LedgerApiCaller, require_ledger_api_key
 from app.database.supabase import get_admin_supabase_client_dep
 
 router = APIRouter()
@@ -219,7 +219,7 @@ class SyncJournalResult(BaseModel):
 async def sync_journals(
     request: SyncJournalsRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
-    caller: LedgerSyncCaller = Depends(require_ledger_sync_key),
+    caller: LedgerApiCaller = Depends(require_ledger_api_key),
 ):
     """仕訳データを Ledger から Hub に同期する
 
@@ -358,7 +358,7 @@ class SyncLedgerRequest(BaseModel):
 async def sync_ledger(
     request: SyncLedgerRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
-    caller: LedgerSyncCaller = Depends(require_ledger_sync_key),
+    caller: LedgerApiCaller = Depends(require_ledger_api_key),
 ):
     """台帳データを Ledger から Hub に同期する
 

@@ -1,15 +1,16 @@
 """Ledger 専用 API キー認証
 
-次の API は Ledger からの呼び出しだけを受け付ける。Ledger は X-API-Key ヘッダーにキーを付けて呼ぶ。
+一般公開用の API キーの仕組みができるまで、/api/v1/* の API はすべて Ledger 専用とする
+（main.py で全ルーターに require_ledger_api_key を指定。/health だけは認証不要）。
+Ledger は X-API-Key ヘッダーにキーを付けて呼ぶ。
 
-- 同期 API（/api/v1/sync/*）: 公開データを書き込むため
-- マスタ API（/api/v1/master/*）: まだ一般公開しないため
-
-- LEDGER_SYNC_API_KEY_PROD: 本番データ用
-- LEDGER_SYNC_API_KEY_DEV: テストデータ用。このキーで送られたデータは常に is_test=true として扱い、
+- LEDGER_SYNC_API_KEY_PROD: 本番データ用。is_test が false / NULL の行だけを扱う
+- LEDGER_SYNC_API_KEY_DEV: テストデータ用。is_test=true の行だけを扱う。
+  同期 API ではこのキーで送られたデータは常に is_test=true として扱い、
   本番データ（is_test=false）の上書きは拒否する
 
-どちらも未設定の場合は、設定漏れで書き込み口が開いたままにならないよう 503 を返す。
+環境変数名は同期 API 専用だった頃の名前のまま（本番に設定済みのため変えない）。
+どちらも未設定の場合は、設定漏れで API が開いたままにならないよう 503 を返す。
 将来の一般公開用 API キーとは別のキーとして扱う。
 """
 
@@ -23,8 +24,8 @@ from app.config import settings
 
 
 @dataclass(frozen=True)
-class LedgerSyncCaller:
-    """認証済みの同期呼び出し元"""
+class LedgerApiCaller:
+    """認証済みの Ledger 呼び出し元"""
 
     is_test_key: bool
 
@@ -35,9 +36,9 @@ def _matches(provided: str, expected: Optional[str]) -> bool:
     return hmac.compare_digest(provided.encode(), expected.encode())
 
 
-def require_ledger_sync_key(
+def require_ledger_api_key(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-) -> LedgerSyncCaller:
+) -> LedgerApiCaller:
     """X-API-Key を検証し、呼び出し元の種別を返す FastAPI 依存関数"""
     prod_key = settings.ledger_sync_api_key_prod
     dev_key = settings.ledger_sync_api_key_dev
@@ -45,7 +46,7 @@ def require_ledger_sync_key(
     if not prod_key and not dev_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="同期用の API キーが設定されていません",
+            detail="Ledger 用の API キーが設定されていません",
         )
 
     if not x_api_key:
@@ -59,9 +60,9 @@ def require_ledger_sync_key(
     is_dev = _matches(x_api_key, dev_key)
 
     if is_prod:
-        return LedgerSyncCaller(is_test_key=False)
+        return LedgerApiCaller(is_test_key=False)
     if is_dev:
-        return LedgerSyncCaller(is_test_key=True)
+        return LedgerApiCaller(is_test_key=True)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

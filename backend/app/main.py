@@ -6,8 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.core.api_key import require_ledger_sync_key
-from app.routers import election_funds, health, master, polimoney, political_funds, sync
+from app.core.api_key import require_ledger_api_key
+from app.routers import (
+    election_funds,
+    elections,
+    health,
+    links,
+    master,
+    organizations,
+    polimoney,
+    political_funds,
+    politicians,
+    sync,
+)
 from app.utils.polimoney_response import MultipleCandidatesException
 
 # Configure logging
@@ -146,11 +157,16 @@ app.include_router(health.router, tags=["health"])
 #     dependencies=[Depends(get_current_admin_user)],
 # )
 
+# /api/v1/* はすべて Ledger 専用 API キーが必要（app/core/api_key.py）。
+# 一般公開用の API キーの仕組みができるまでは公開しない。/health だけは認証不要
+LEDGER_API_DEPENDENCIES = [Depends(require_ledger_api_key)]
+
 # 政治資金収支報告書のデータ取得
 app.include_router(
     political_funds.router,
     prefix="/api/v1",
     tags=["political-funds"],
+    dependencies=LEDGER_API_DEPENDENCIES,
 )
 
 # 選挙運動費用収支報告書のデータ取得
@@ -158,6 +174,7 @@ app.include_router(
     election_funds.router,
     prefix="/api/v1",
     tags=["election-funds"],
+    dependencies=LEDGER_API_DEPENDENCIES,
 )
 
 # Polimoney向け公開データAPI
@@ -165,22 +182,51 @@ app.include_router(
     polimoney.router,
     prefix="/api/v1",
     tags=["polimoney"],
+    dependencies=LEDGER_API_DEPENDENCIES,
 )
 
-# マスタデータAPI（勘定科目など）— 読み取り専用。一般公開まではLedger 専用 API キーが必要
+# マスタデータAPI（勘定科目など）— 読み取り専用
 app.include_router(
     master.router,
     prefix="/api/v1",
     tags=["master"],
-    dependencies=[Depends(require_ledger_sync_key)],
+    dependencies=LEDGER_API_DEPENDENCIES,
 )
 
-# 同期API（Ledger → Hub）— Ledger 専用 API キーが必要（app/core/api_key.py）
+# 政治家・政治団体・選挙（Ledger 向け）
+app.include_router(
+    politicians.router,
+    prefix="/api/v1",
+    tags=["politicians"],
+    dependencies=LEDGER_API_DEPENDENCIES,
+)
+app.include_router(
+    organizations.router,
+    prefix="/api/v1",
+    tags=["organizations"],
+    dependencies=LEDGER_API_DEPENDENCIES,
+)
+app.include_router(
+    elections.router,
+    prefix="/api/v1",
+    tags=["elections"],
+    dependencies=LEDGER_API_DEPENDENCIES,
+)
+
+# 政治家 ↔ 選挙 / 政治団体の紐付け（Ledger 向け）
+app.include_router(
+    links.router,
+    prefix="/api/v1",
+    tags=["links"],
+    dependencies=LEDGER_API_DEPENDENCIES,
+)
+
+# 同期API（Ledger → Hub）
 app.include_router(
     sync.router,
     prefix="/api/v1",
     tags=["sync"],
-    dependencies=[Depends(require_ledger_sync_key)],
+    dependencies=LEDGER_API_DEPENDENCIES,
 )
 
 

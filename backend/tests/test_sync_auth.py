@@ -87,8 +87,8 @@ def test_unconfigured_keys_fail_closed(monkeypatch, client):
     assert res.status_code == 503
 
 
-def test_public_read_api_does_not_require_sync_key(keys, client):
-    # 公開の読み取り API には同期用キーを要求しない
+def test_health_does_not_require_api_key(keys, client):
+    # /health だけは API キーなしで呼べる
     res = client.get("/health")
     assert res.status_code != 401
 

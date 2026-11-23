@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, status
 from supabase import Client
 
 from app import schemas
-from app.database.supabase import get_supabase_client_dep
+from app.database.supabase import get_admin_supabase_client_dep
 from app.utils.election_funds_response import (
     build_election_funds_response,
     build_election_funds_response_for_ledger,
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/polimoney")
     response_model=schemas.PoliticiansListResponse,
 )
 async def get_polimoney_politicians(
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """収支データが公開されている政治家の一覧を取得する
 
@@ -54,7 +54,7 @@ async def get_polimoney_politicians(
     response_model=schemas.ElectionsListResponse,
 )
 async def get_polimoney_elections(
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """収支データが公開されている選挙の一覧を取得する
 
@@ -86,7 +86,7 @@ async def get_polimoney_election_journals(
         default=None,
         description="政治家 ID（同じ選挙に複数候補者がいる場合は必須）",
     ),
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """指定選挙の収支データを Polimoney JSON 形式で取得する
 
@@ -115,7 +115,7 @@ async def get_polimoney_election_journals(
 )
 async def get_polimoney_election_candidates(
     election_id: UUID,
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """指定選挙の候補者（収支データ公開済み）一覧を取得する
 
@@ -140,7 +140,7 @@ async def get_polimoney_election_candidates(
 )
 async def get_polimoney_ledger_journals(
     ledger_id: UUID,
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """台帳IDを指定して収支データを Polimoney JSON 形式で取得する
 

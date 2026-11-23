@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.database.supabase import get_supabase_client_dep
+from app.database.supabase import get_admin_supabase_client_dep
 from app.main import app
 
 PROD_KEY = "test-prod-key"
@@ -60,7 +60,7 @@ def _use_rows(rows):
     query = FakeQuery(rows)
     fake = MagicMock()
     fake.table.return_value = query
-    app.dependency_overrides[get_supabase_client_dep] = lambda: fake
+    app.dependency_overrides[get_admin_supabase_client_dep] = lambda: fake
     return query
 
 

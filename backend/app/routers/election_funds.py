@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from supabase import Client
 
 from app import schemas
-from app.database.supabase import get_supabase_client_dep
+from app.database.supabase import get_admin_supabase_client_dep
 from app.utils.election_funds_response import build_election_funds_response
 
 router = APIRouter()
@@ -21,7 +21,7 @@ router = APIRouter()
 )
 async def get_election_funds_by_ledger_id(
     ledger_id: UUID,
-    supabase: Client = Depends(get_supabase_client_dep),
+    supabase: Client = Depends(get_admin_supabase_client_dep),
 ):
     """指定した台帳IDの選挙資金データを取得する
 
