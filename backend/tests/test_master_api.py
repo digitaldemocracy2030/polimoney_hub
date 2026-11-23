@@ -8,8 +8,12 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.database.supabase import get_supabase_client_dep
 from app.main import app
+
+PROD_KEY = "test-prod-key"
+AUTH = {"X-API-Key": PROD_KEY}
 
 CASH = {
     "code": "ASSET_CASH",
@@ -45,8 +49,10 @@ class FakeQuery:
 
 
 @pytest.fixture
-def client():
-    yield TestClient(app)
+def client(monkeypatch):
+    monkeypatch.setattr(settings, "ledger_sync_api_key_prod", PROD_KEY)
+    monkeypatch.setattr(settings, "ledger_sync_api_key_dev", "test-dev-key")
+    yield TestClient(app, headers=AUTH)
     app.dependency_overrides.clear()
 
 
@@ -58,7 +64,7 @@ def _use_rows(rows):
     return query
 
 
-def test_list_returns_active_codes_in_display_order_without_api_key(client):
+def test_list_returns_active_codes_in_display_order(client):
     query = _use_rows([CASH])
     res = client.get("/api/v1/master/account-codes")
     assert res.status_code == 200
@@ -108,3 +114,13 @@ def test_get_one_not_found(client):
     _use_rows([])
     res = client.get("/api/v1/master/account-codes/NOPE")
     assert res.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/v1/master/account-codes", "/api/v1/master/account-codes/ASSET_CASH"]
+)
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "wrong"}])
+def test_requires_ledger_api_key(client, path, headers):
+    _use_rows([CASH])
+    res = TestClient(app).get(path, headers=headers)
+    assert res.status_code == 401

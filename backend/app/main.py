@@ -167,11 +167,12 @@ app.include_router(
     tags=["polimoney"],
 )
 
-# マスタデータAPI（勘定科目など）— 公開の読み取り専用
+# マスタデータAPI（勘定科目など）— 読み取り専用。一般公開まではLedger 専用 API キーが必要
 app.include_router(
     master.router,
     prefix="/api/v1",
     tags=["master"],
+    dependencies=[Depends(require_ledger_sync_key)],
 )
 
 # 同期API（Ledger → Hub）— Ledger 専用 API キーが必要（app/core/api_key.py）

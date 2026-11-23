@@ -1,6 +1,7 @@
 """マスタデータ API
 
-勘定科目などの共通マスタを返す。公開の読み取り専用 API で、API キーは不要。
+勘定科目などの共通マスタを返す読み取り専用 API。
+一般公開するまでは Ledger 専用 API キーが必要（main.py で require_ledger_sync_key を指定）。
 Ledger は仕訳入力と Hub 同期でこの勘定科目を使う。
 """
 
