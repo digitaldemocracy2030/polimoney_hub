@@ -35,8 +35,10 @@ def _fake_supabase(existing_ledger=None):
     table = client.table.return_value
     select_chain = table.select.return_value.eq.return_value.maybe_single.return_value
     select_chain.execute.return_value = MagicMock(data=existing_ledger)
-    table.insert.return_value.select.return_value.single.return_value.execute.return_value = MagicMock(
-        data={"id": "hub-ledger-1"}
+    # supabase-py の insert() の戻り値は execute() しか持たない（.select() を呼ぶと失敗する）
+    table.insert.return_value = MagicMock(spec=["execute"])
+    table.insert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "hub-ledger-1"}]
     )
     return client
 

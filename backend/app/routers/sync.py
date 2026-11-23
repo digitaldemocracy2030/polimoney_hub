@@ -145,17 +145,14 @@ async def sync_contacts(
                 )
             else:
                 # 新規作成
+                # insert().execute() は挿入した行を返す（supabase-py の insert は .select() を持たない）
                 insert_result = (
-                    supabase.table("public_contacts")
-                    .insert(record)
-                    .select("id")
-                    .single()
-                    .execute()
+                    supabase.table("public_contacts").insert(record).execute()
                 )
 
                 results.append(
                     SyncContactResult(
-                        hub_contact_id=insert_result.data["id"],
+                        hub_contact_id=insert_result.data[0]["id"],
                         contact_source_id=contact.contact_source_id,
                         action="created",
                     )
@@ -416,15 +413,10 @@ async def sync_ledger(
     else:
         # 新規作成
         record["first_synced_at"] = _utc_now()
-        insert_result = (
-            supabase.table("public_ledgers")
-            .insert(record)
-            .select("id")
-            .single()
-            .execute()
-        )
+        # insert().execute() は挿入した行を返す（supabase-py の insert は .select() を持たない）
+        insert_result = supabase.table("public_ledgers").insert(record).execute()
         return {
-            "data": {**record, "id": insert_result.data["id"]},
+            "data": {**record, "id": insert_result.data[0]["id"]},
             "action": "created",
         }
 
