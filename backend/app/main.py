@@ -6,8 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.core.admin_auth import require_admin_user
 from app.core.api_key import require_ledger_api_key
 from app.routers import (
+    admin_verifications,
     election_funds,
     elections,
     health,
@@ -18,6 +20,7 @@ from app.routers import (
     political_funds,
     politicians,
     sync,
+    verifications,
 )
 from app.utils.polimoney_response import MultipleCandidatesException
 
@@ -227,6 +230,22 @@ app.include_router(
     prefix="/api/v1",
     tags=["sync"],
     dependencies=LEDGER_API_DEPENDENCIES,
+)
+
+# 本人確認（政治家・政治団体の管理者）の申請と確認（Ledger 向け）
+app.include_router(
+    verifications.router,
+    prefix="/api/v1",
+    tags=["verifications"],
+    dependencies=LEDGER_API_DEPENDENCIES,
+)
+
+# 管理者 API（Hub の Supabase Auth でログインし、admin_users に登録された人だけ）
+app.include_router(
+    admin_verifications.router,
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_user)],
 )
 
 
