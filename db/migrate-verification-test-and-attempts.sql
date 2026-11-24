@@ -102,9 +102,11 @@ BEGIN
       is_lg_verified = v.is_lg_domain,
       party = COALESCE(NULLIF(v.party, ''), party),
       -- ドメインが変わるときは、古いドメインの公式サイトの URL を外す
+      -- （申請の種別が new でも別ドメインなら外す。SET の右辺の verified_domain は更新前の値）
       official_url = CASE
         WHEN NULLIF(v.official_url, '') IS NOT NULL THEN v.official_url
-        WHEN v.request_type = 'domain_change' THEN NULL
+        WHEN v.request_type = 'domain_change'
+          OR v.official_domain IS DISTINCT FROM verified_domain THEN NULL
         ELSE official_url
       END,
       updated_at = v_now
