@@ -175,3 +175,98 @@ def test_change_log_dev_key_cannot_write_production_ledger(keys, client):
     res = client.post("/api/v1/sync/change-log", json=CHANGE_LOG_BODY, headers={"X-API-Key": DEV_KEY})
     assert res.status_code == 403
     tables["ledger_change_logs"].insert.assert_not_called()
+
+
+# ============================================
+# 関係者（public_contacts は is_test を持たないので、紐付く公開台帳で判定する）
+# ============================================
+
+
+def _contact(ledger_id="hub-ledger-test"):
+    return {
+        "contact_source_id": "contact-1",
+        "ledger_id": ledger_id,
+        "contact_type": "person",
+        "name": "寄附 太郎",
+    }
+
+
+def _fake_contacts_supabase(existing_contact, ledgers):
+    """public_contacts の既存行と public_ledgers の is_test を返すモック"""
+    client = MagicMock()
+    tables = {"public_contacts": MagicMock(), "public_ledgers": MagicMock()}
+    client.table.side_effect = lambda name: tables[name]
+    contacts = tables["public_contacts"]
+    contacts.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        MagicMock(data=existing_contact)
+    )
+    contacts.insert.return_value = MagicMock(spec=["execute"])
+    contacts.insert.return_value.execute.return_value = MagicMock(data=[{"id": "hub-contact-1"}])
+
+    def ledger_query(_column, ledger_id):
+        query = MagicMock()
+        rows = [{"is_test": ledgers[ledger_id]}] if ledger_id in ledgers else []
+        query.limit.return_value.execute.return_value = MagicMock(data=rows)
+        return query
+
+    tables["public_ledgers"].select.return_value.eq.side_effect = ledger_query
+    return client, tables
+
+
+LEDGERS = {"hub-ledger-test": True, "hub-ledger-prod": False}
+
+
+def test_dev_key_creates_contact_on_test_ledger(keys, client):
+    fake, tables = _fake_contacts_supabase(None, LEDGERS)
+    _use_supabase(fake)
+    res = client.post("/api/v1/sync/contacts", json=[_contact()], headers={"X-API-Key": DEV_KEY})
+    assert res.status_code == 200
+    assert res.json()["errors"] == []
+    assert res.json()["data"][0]["action"] == "created"
+
+
+def test_dev_key_cannot_create_contact_on_production_ledger(keys, client):
+    fake, tables = _fake_contacts_supabase(None, LEDGERS)
+    _use_supabase(fake)
+    res = client.post(
+        "/api/v1/sync/contacts", json=[_contact("hub-ledger-prod")], headers={"X-API-Key": DEV_KEY}
+    )
+    assert res.status_code == 200
+    assert res.json()["data"] == []
+    assert len(res.json()["errors"]) == 1
+    tables["public_contacts"].insert.assert_not_called()
+
+
+def test_dev_key_cannot_overwrite_production_contact(keys, client):
+    # 既存の関係者は本番の台帳に紐付く。送られてきた ledger_id がテストでも更新しない
+    fake, tables = _fake_contacts_supabase(
+        {"id": "hub-contact-1", "ledger_id": "hub-ledger-prod"}, LEDGERS
+    )
+    _use_supabase(fake)
+    res = client.post("/api/v1/sync/contacts", json=[_contact()], headers={"X-API-Key": DEV_KEY})
+    assert res.status_code == 200
+    assert len(res.json()["errors"]) == 1
+    tables["public_contacts"].update.assert_not_called()
+
+
+def test_dev_key_cannot_use_unknown_ledger(keys, client):
+    fake, tables = _fake_contacts_supabase(None, LEDGERS)
+    _use_supabase(fake)
+    res = client.post(
+        "/api/v1/sync/contacts", json=[_contact("missing")], headers={"X-API-Key": DEV_KEY}
+    )
+    assert len(res.json()["errors"]) == 1
+    tables["public_contacts"].insert.assert_not_called()
+
+
+def test_prod_key_updates_contact_without_ledger_check(keys, client):
+    fake, tables = _fake_contacts_supabase(
+        {"id": "hub-contact-1", "ledger_id": "hub-ledger-prod"}, LEDGERS
+    )
+    _use_supabase(fake)
+    res = client.post(
+        "/api/v1/sync/contacts", json=[_contact("hub-ledger-prod")], headers={"X-API-Key": PROD_KEY}
+    )
+    assert res.status_code == 200
+    assert res.json()["data"][0]["action"] == "updated"
+    tables["public_ledgers"].select.assert_not_called()
