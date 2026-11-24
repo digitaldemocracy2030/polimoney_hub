@@ -1,7 +1,10 @@
 """同期APIエンドポイント
 
 Ledger から Hub への公開データ同期を受け付ける。
-contacts → journals → ledger の順に同期する。
+Ledger は ledger → contacts → journals の順に呼ぶ（関係者・仕訳は公開台帳に紐付くため）。
+
+DEV キー（テストデータ用）では、本番データ（is_test が true でない公開台帳とその関係者・仕訳）を
+作成・更新できない。
 """
 
 from datetime import datetime, timezone
@@ -79,6 +82,7 @@ class SyncContactsResponse(BaseModel):
 async def sync_contacts(
     contacts: list[SyncContactInput],
     supabase: Client = Depends(get_admin_supabase_client_dep),
+    caller: LedgerApiCaller = Depends(require_ledger_api_key),
 ):
     """関係者データを Ledger から Hub に同期する
 
@@ -94,17 +98,51 @@ async def sync_contacts(
     """
     results: list[SyncContactResult] = []
     errors: list[SyncContactError] = []
+    # 公開台帳の ID → テストデータか（DEV キーのときだけ引く）
+    test_ledgers: dict[str, bool] = {}
+
+    def is_test_ledger(ledger_id: Optional[str]) -> bool:
+        if not ledger_id:
+            return False
+        if ledger_id not in test_ledgers:
+            rows = (
+                supabase.table("public_ledgers")
+                .select("is_test")
+                .eq("id", ledger_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+            test_ledgers[ledger_id] = bool(rows and rows[0].get("is_test"))
+        return test_ledgers[ledger_id]
 
     for contact in contacts:
         try:
             # contact_source_id で既存レコードを検索
             existing = (
                 supabase.table("public_contacts")
-                .select("id")
+                .select("id, ledger_id")
                 .eq("contact_source_id", contact.contact_source_id)
                 .maybe_single()
                 .execute()
             )
+
+            # DEV キーは、テストデータの公開台帳の関係者だけを作成・更新できる
+            # （public_contacts に is_test は無いので、紐付く公開台帳で判定する）
+            if caller.is_test_key and not (
+                is_test_ledger(contact.ledger_id)
+                and (
+                    not (existing and existing.data)
+                    or is_test_ledger(existing.data.get("ledger_id"))
+                )
+            ):
+                errors.append(
+                    SyncContactError(
+                        contact_source_id=contact.contact_source_id,
+                        error="開発用キーでは本番データの関係者を作成・更新できません",
+                    )
+                )
+                continue
 
             # 非公開フィールドは NULL にする
             name = None if contact.is_name_private else contact.name
