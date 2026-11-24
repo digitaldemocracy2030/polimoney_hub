@@ -38,6 +38,11 @@ class Settings(BaseSettings):
         None, env="LEDGER_SYNC_API_KEY_DEV"
     )
 
+    # 本人確認の確認コードのメール送信（Resend。app/services/mailer.py）
+    # MAIL_FROM のドメインは Resend で認証しておくこと。例: "Polimoney <noreply@example.org>"
+    resend_api_key: Optional[str] = Field(None, env="RESEND_API_KEY")
+    mail_from: Optional[str] = Field(None, env="MAIL_FROM")
+
     class Config:
         """Pydantic設定
 
