@@ -22,7 +22,7 @@ interface PageData {
 
 export const handler: Handlers<PageData, AuthState> = {
   async GET(_req, ctx) {
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
 
     try {
       const res = await fetch(`${apiBase}/api/admin/users`, {
@@ -46,7 +46,7 @@ export const handler: Handlers<PageData, AuthState> = {
   },
 
   async POST(req, ctx) {
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
     const form = await req.formData();
     const action = form.get("action")?.toString();
 

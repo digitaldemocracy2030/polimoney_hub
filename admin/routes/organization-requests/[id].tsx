@@ -42,7 +42,7 @@ const evidenceTypeLabels: Record<string, string> = {
 export const handler: Handlers<PageData, AuthState> = {
   async GET(_req, ctx) {
     const { id } = ctx.params;
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
     const apiKey = Deno.env.get("API_KEY_DEV") || Deno.env.get("API_KEY_PROD") || "dev-api-key";
 
     try {
@@ -69,7 +69,7 @@ export const handler: Handlers<PageData, AuthState> = {
     const form = await req.formData();
     const action = form.get("action");
 
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
     const authHeader = { Authorization: `Bearer ${ctx.state.accessToken}` };
     const apiKey = Deno.env.get("API_KEY_DEV") || Deno.env.get("API_KEY_PROD") || "dev-api-key";
 

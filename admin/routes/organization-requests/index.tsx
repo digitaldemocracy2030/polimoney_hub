@@ -52,7 +52,7 @@ export const handler: Handlers<PageData, AuthState> = {
     const url = new URL(req.url);
     const status = url.searchParams.get("status") || "";
 
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
 
     try {
       const queryParams = status ? `?status=${status}` : "";

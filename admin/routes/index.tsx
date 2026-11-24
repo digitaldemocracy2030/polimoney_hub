@@ -14,7 +14,7 @@ interface DashboardData {
 
 export const handler: Handlers<DashboardData, AuthState> = {
   async GET(_req, ctx) {
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
     const authHeader = { Authorization: `Bearer ${ctx.state.accessToken}` };
     const apiKey = Deno.env.get("API_KEY_DEV") || Deno.env.get("API_KEY_PROD") || "dev-api-key";
 

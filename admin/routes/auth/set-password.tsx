@@ -62,7 +62,7 @@ export const handler: Handlers<SetPasswordData> = {
     }
 
     // Supabase API でパスワードを更新
-    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:8000";
+    const apiBase = Deno.env.get("API_BASE_URL") || "http://localhost:3722";
     try {
       const res = await fetch(`${apiBase}/api/auth/update-password`, {
         method: "POST",

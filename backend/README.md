@@ -33,8 +33,8 @@ docker-compose up --build
 
 これで以下のサービスが起動します：
 
-- APIサーバー: `http://localhost:8000`
-- 自動生成APIドキュメント: `http://localhost:8000/docs`
+- APIサーバー: `http://localhost:3722`
+- 自動生成APIドキュメント: `http://localhost:3722/docs`
 
 ## 開発用（ローカル実行）
 
@@ -82,7 +82,7 @@ SUPABASE_PUBLISHABLE_KEY=your-anon-key
 ENV=development
 DEBUG=true
 HOST=0.0.0.0
-PORT=8000
+PORT=3722
 CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
 ```
 
@@ -90,9 +90,9 @@ CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
 
 FastAPIにより自動生成されるAPIドキュメント：
 
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-- OpenAPI Schema: `http://localhost:8000/openapi.json`
+- Swagger UI: `http://localhost:3722/docs`
+- ReDoc: `http://localhost:3722/redoc`
+- OpenAPI Schema: `http://localhost:3722/openapi.json`
 
 ## API エンドポイント
 
