@@ -1,6 +1,7 @@
 """本人確認 API（Ledger 向け）と審査 API（管理者向け）のテスト
 
 Supabase には接続しない。行を保持して select / insert / update / upsert をまねる簡易な DB に差し替える。
+承認の DB 関数（rpc）は呼び出しを記録するだけ。関数そのものは Hub DB でトランザクション内で確かめる。
 メール送信と DNS の問い合わせもモックにする。
 """
 
@@ -18,6 +19,7 @@ from app.database.supabase import get_admin_supabase_client_dep
 from app.main import app
 from app.services import dns_txt, verification
 from app.services.mailer import MailNotConfiguredError
+from postgrest.exceptions import APIError
 
 PROD = {"X-API-Key": "test-prod-key"}
 DEV = {"X-API-Key": "test-dev-key"}
@@ -66,6 +68,11 @@ class FakeQuery:
         self.filters.append(lambda r: r.get(column) in values)
         return self
 
+    def is_(self, column, value):
+        assert value == "null", value
+        self.filters.append(lambda r: r.get(column) is None)
+        return self
+
     def or_(self, expression):
         # apply_test_scope の "is_test.is.null,is_test.eq.false" だけに対応
         assert expression == "is_test.is.null,is_test.eq.false", expression
@@ -81,6 +88,9 @@ class FakeQuery:
 
     def execute(self):
         rows = self.db.rows.setdefault(self.table, [])
+        if self.op in ("insert", "update") and self.db.before_write:
+            # 読み取りと書き込みの間に、別の要求が行を変えた状況をまねる
+            self.db.before_write.pop(0)(self.db)
         if self.op == "insert":
             row = {"id": str(uuid.uuid4()), "created_at": "2026-11-24T00:00:00+00:00", **self.payload}
             rows.append(row)
@@ -108,6 +118,20 @@ class FakeDB:
         self.rows = {name: [dict(r) for r in rows] for name, rows in tables.items()}
         self.auth = SimpleNamespace(get_user=self._get_user)
         self.tokens = {}
+        self.before_write = []
+        self.rpc_calls = []
+        self.rpc_result = None
+
+    def rpc(self, name, params):
+        self.rpc_calls.append((name, params))
+        result = self.rpc_result
+
+        def execute():
+            if isinstance(result, Exception):
+                raise result
+            return SimpleNamespace(data=result)
+
+        return SimpleNamespace(execute=execute)
 
     def table(self, name):
         return FakeQuery(self, name)
@@ -561,61 +585,39 @@ def test_admin_list_filters(client):
     assert [d["id"] for d in res.json()["data"]] == ["v1"]
 
 
-def test_approve_politician_creates_verified_politician(client):
-    row = _email_verification(
-        status="email_verified", politician_name="山田 太郎", party="無所属", is_lg_domain=True,
-        official_url="https://yamada.example.jp",
-        request_type="new", is_test=True,
-    )
-    db = use(FakeDB(
-        politician_verifications=[row],
-        # 本番データの同じユーザーの政治家は更新しない
-        politicians=[{"id": "p-prod", "ledger_user_id": USER_ID, "is_test": False, "is_verified": False}],
-    ))
+def test_approve_politician_calls_db_function(client):
+    row = _email_verification(status="email_verified")
+    db = use(FakeDB(politician_verifications=[row]))
+    db.rpc_result = {**row, "status": "approved", "approved_politician_id": "p1",
+                     "reviewed_by": ADMIN_ID}
     res = client.post(f"/api/admin/politician-verifications/{row['id']}/approve")
     assert res.status_code == 200
     data = res.json()["data"]
     assert data["status"] == "approved"
-    assert data["reviewed_by"] == ADMIN_ID
-
-    politicians = db.all("politicians")
-    assert politicians[0]["is_verified"] is False
-    created = politicians[1]
-    assert data["approved_politician_id"] == created["id"]
-    assert created["name"] == "山田 太郎"
-    assert created["is_test"] is True
-    assert created["is_verified"] is True
-    assert created["is_lg_verified"] is True
-    assert created["verified_domain"] == "city.example.lg.jp"
-    assert created["official_url"] == "https://yamada.example.jp"
+    assert data["approved_politician_id"] == "p1"
+    assert "verification_code" not in data
+    assert db.rpc_calls == [(
+        "approve_politician_verification",
+        {"p_verification_id": row["id"], "p_reviewer_id": ADMIN_ID},
+    )]
 
 
-def test_approve_politician_updates_existing(client):
-    row = _email_verification(
-        status="dns_verified", politician_name="山田 太郎", request_type="domain_change",
-        official_domain="new.example.jp",
-    )
-    db = use(FakeDB(
-        politician_verifications=[row],
-        politicians=[{"id": "p1", "ledger_user_id": USER_ID, "is_test": None,
-                      "official_url": "https://old.example.jp"}],
-    ))
-    res = client.post(f"/api/admin/politician-verifications/{row['id']}/approve")
-    assert res.status_code == 200
-    assert res.json()["data"]["approved_politician_id"] == "p1"
-    politician = db.all("politicians")[0]
-    assert politician["is_verified"] is True
-    assert politician["verified_domain"] == "new.example.jp"
-    assert politician["official_url"] is None
-    assert len(db.all("politicians")) == 1
-
-
-def test_approve_requires_confirmed_status(client):
-    row = _email_verification(status="email_sent")
-    db = use(FakeDB(politician_verifications=[row]))
-    res = client.post(f"/api/admin/politician-verifications/{row['id']}/approve")
-    assert res.status_code == 409
-    assert db.all("politicians") == []
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("verification_not_found", 404),
+        ("verification_not_confirmed", 409),
+        ("organization_not_found", 404),
+        ("something else", 500),
+    ],
+)
+def test_approve_maps_db_function_errors(client, message, expected):
+    row = _dns_verification(status="dns_verified")
+    db = use(FakeDB(organization_manager_verifications=[row]))
+    db.rpc_result = APIError({"message": message, "code": "P0001"})
+    res = client.post(f"/api/admin/organization-manager-verifications/{row['id']}/approve")
+    assert res.status_code == expected
+    assert db.rpc_calls[0][0] == "approve_organization_manager_verification"
 
 
 def test_reject(client):
@@ -637,40 +639,114 @@ def test_reject(client):
     assert res.status_code == 409
 
 
-def test_approve_org_manager_creates_org_and_manager(client):
-    row = _dns_verification(
-        status="dns_verified", organization_id=None, organization_name="山田太郎後援会",
-        organization_type="support_group", request_type="new",
+def test_reject_conflicts_when_approved_meanwhile(client):
+    row = _email_verification(status="email_verified")
+    db = use(FakeDB(politician_verifications=[row]))
+
+    def approve(db):
+        db.all("politician_verifications")[0]["status"] = "approved"
+
+    db.before_write.append(approve)
+    res = client.post(
+        f"/api/admin/politician-verifications/{row['id']}/reject",
+        json={"rejection_reason": "却下"},
     )
-    db = use(FakeDB(organization_manager_verifications=[row]))
-    res = client.post(f"/api/admin/organization-manager-verifications/{row['id']}/approve")
-    assert res.status_code == 200
-    org = db.all("organizations")[0]
-    assert org["name"] == "山田太郎後援会"
-    assert org["type"] == "support_group"
-    assert org["is_verified"] is True
-    assert org["is_test"] is False
-    manager = db.all("organization_managers")[0]
-    assert manager["ledger_user_id"] == USER_ID
-    assert manager["organization_id"] == org["id"]
-    assert manager["verified_domain"] == "yamada.example.jp"
-    assert manager["is_active"] is True
-    assert res.json()["data"]["organization_id"] == org["id"]
+    assert res.status_code == 409
+    assert db.all("politician_verifications")[0]["status"] == "approved"
 
 
-def test_approve_org_manager_existing_org_upserts_manager(client):
-    row = _dns_verification(status="dns_verified", organization_id="org-1", organization_name="団体")
-    db = use(FakeDB(
-        organization_manager_verifications=[row],
-        organizations=[{"id": "org-1", "is_test": False, "is_verified": False}],
-        organization_managers=[{"id": "m1", "ledger_user_id": USER_ID, "organization_id": "org-1",
-                                "is_active": False}],
-    ))
-    res = client.post(f"/api/admin/organization-manager-verifications/{row['id']}/approve")
-    assert res.status_code == 200
-    assert db.all("organizations")[0]["is_verified"] is True
-    managers = db.all("organization_managers")
-    assert len(managers) == 1 and managers[0]["is_active"] is True
+# ============================================
+# 同時に届いた要求
+# ============================================
+
+
+def test_create_unique_violation_returns_409(client):
+    db = use(FakeDB())
+
+    def concurrent_insert(db):
+        raise APIError({"message": "duplicate key", "code": "23505"})
+
+    db.before_write.append(concurrent_insert)
+    res = client.post("/api/v1/politician-verifications", json=politician_body(), headers=PROD)
+    assert res.status_code == 409
+
+
+def test_send_code_concurrent_resend_is_rate_limited(client, sent_mail):
+    row = _sent()
+    row["verification_code_sent_at"] = minutes_ago(2)
+    db = use(FakeDB(politician_verifications=[row]))
+
+    def other_send(db):
+        stored = db.all("politician_verifications")[0]
+        stored["verification_code"] = verification.hash_code("999999")
+        stored["verification_code_sent_at"] = datetime.now(timezone.utc).isoformat()
+
+    db.before_write.append(other_send)
+    res = client.post(
+        f"/api/v1/politician-verifications/{row['id']}/send-verification",
+        json={"ledger_user_id": USER_ID},
+        headers=PROD,
+    )
+    assert res.status_code == 429
+    assert sent_mail == []
+    stored = db.all("politician_verifications")[0]
+    assert stored["verification_code"] == verification.hash_code("999999")
+
+
+def test_verify_email_concurrent_wrong_codes_are_all_counted(client):
+    row = _sent(verification_attempts=2)
+    db = use(FakeDB(politician_verifications=[row]))
+
+    def other_wrong_attempt(db):
+        db.all("politician_verifications")[0]["verification_attempts"] = 3
+
+    db.before_write.append(other_wrong_attempt)
+    res = client.post(
+        f"/api/v1/politician-verifications/{row['id']}/verify-email",
+        json={"ledger_user_id": USER_ID, "code": "000000"},
+        headers=PROD,
+    )
+    assert res.status_code == 400
+    # 他の要求の 1 回と、この要求の 1 回の両方が数えられる
+    assert db.all("politician_verifications")[0]["verification_attempts"] == 4
+
+
+def test_verify_email_reserves_attempt_before_comparing(client):
+    row = _sent(verification_attempts=verification.MAX_CODE_ATTEMPTS - 1)
+    db = use(FakeDB(politician_verifications=[row]))
+
+    def other_wrong_attempt(db):
+        stored = db.all("politician_verifications")[0]
+        stored["verification_attempts"] = verification.MAX_CODE_ATTEMPTS
+
+    db.before_write.append(other_wrong_attempt)
+    res = client.post(
+        f"/api/v1/politician-verifications/{row['id']}/verify-email",
+        json={"ledger_user_id": USER_ID, "code": "123456"},
+        headers=PROD,
+    )
+    # 正しいコードでも、上限に達した後は照合しない
+    assert res.status_code == 429
+    assert db.all("politician_verifications")[0]["status"] == "email_sent"
+
+
+def test_verify_email_old_code_after_resend_is_rejected(client):
+    row = _sent()
+    db = use(FakeDB(politician_verifications=[row]))
+
+    def resend(db):
+        stored = db.all("politician_verifications")[0]
+        stored["verification_code"] = verification.hash_code("654321")
+
+    # 試行回数を増やした後、確認済みにする前に再送信された
+    db.before_write.extend([lambda db: None, resend])
+    res = client.post(
+        f"/api/v1/politician-verifications/{row['id']}/verify-email",
+        json={"ledger_user_id": USER_ID, "code": "123456"},
+        headers=PROD,
+    )
+    assert res.status_code == 409
+    assert db.all("politician_verifications")[0]["status"] == "email_sent"
 
 
 @pytest.mark.parametrize(

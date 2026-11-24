@@ -12,6 +12,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.api_key import LedgerApiCaller, require_ledger_api_key
@@ -56,6 +57,13 @@ POLITICIAN = VerificationKind("politician_verifications", "政治家")
 ORGANIZATION_MANAGER = VerificationKind(
     "organization_manager_verifications", "政治団体の管理者"
 )
+
+
+# PostgreSQL の一意制約違反
+UNIQUE_VIOLATION = "23505"
+ACTIVE_REQUEST_EXISTS = "手続き中の申請があります。完了するか却下されるまで新しい申請はできません"
+# 同時に届いた確認コードの照合が競合したときに、読み直す回数
+MAX_CONCURRENT_RETRIES = 3
 
 
 def _server_error(message: str, e: Exception) -> HTTPException:
@@ -111,16 +119,22 @@ def _ensure_no_active(supabase: Client, kind: VerificationKind, query_filters, c
         raise _server_error("申請の確認に失敗しました", e)
     if active:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="手続き中の申請があります。完了するか却下されるまで新しい申請はできません",
+            status_code=status.HTTP_409_CONFLICT, detail=ACTIVE_REQUEST_EXISTS
         )
 
 
 def _insert(supabase: Client, kind: VerificationKind, record: dict) -> dict:
     try:
         return supabase.table(kind.table).insert(record).execute().data[0]
+    except APIError as e:
+        # 同時に申請された場合（手続き中の申請の一意制約に違反）は、事前の確認と同じく 409
+        if e.code == UNIQUE_VIOLATION:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=ACTIVE_REQUEST_EXISTS
+            ) from e
+        raise _server_error("申請の作成に失敗しました", e) from e
     except Exception as e:
-        raise _server_error("申請の作成に失敗しました", e)
+        raise _server_error("申請の作成に失敗しました", e) from e
 
 
 def _list_by_user(
@@ -173,17 +187,22 @@ def _update(
     verification: dict,
     fields: dict,
     expected_statuses: list[str],
+    expected_values: Optional[dict] = None,
 ) -> Optional[dict]:
-    """状態が変わっていなければ更新する（同時に操作された場合は None）"""
+    """状態（と expected_values の列の値）が読み取ったときのままなら更新する
+
+    同時に操作されて変わっていた場合は更新せず None を返す。
+    """
     try:
-        rows = (
+        query = (
             supabase.table(kind.table)
             .update({**fields, "updated_at": utc_now().isoformat()})
             .eq("id", verification["id"])
             .in_("status", expected_statuses)
-            .execute()
-            .data
         )
+        for column, value in (expected_values or {}).items():
+            query = query.is_(column, "null") if value is None else query.eq(column, value)
+        rows = query.execute().data
     except Exception as e:
         raise _server_error("申請の更新に失敗しました", e)
     return rows[0] if rows else None
@@ -193,6 +212,18 @@ def _conflict() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="申請の状態が変わりました。画面を再読み込みしてください",
+    )
+
+
+def _sent_recently(verification: dict, now) -> bool:
+    sent_at = parse_timestamp(verification.get("verification_code_sent_at"))
+    return bool(sent_at and now - sent_at < RESEND_INTERVAL)
+
+
+def _resend_too_soon() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="確認コードの再送信は 1 分ほど待ってから行ってください",
     )
 
 
@@ -211,14 +242,12 @@ def _send_code(
         raise _bad_request("この申請には確認コードを送信できません")
 
     now = utc_now()
-    sent_at = parse_timestamp(verification.get("verification_code_sent_at"))
-    if sent_at and now - sent_at < RESEND_INTERVAL:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="確認コードの再送信は 1 分ほど待ってから行ってください",
-        )
+    if _sent_recently(verification, now):
+        raise _resend_too_soon()
 
     code = generate_code()
+    # 読み取ったときのコードのままなら更新する。同時に届いた送信要求は 1 件だけが通る
+    # （コードのハッシュは送信のたびに変わるので、送信日時の代わりに比較に使える）
     updated = _update(
         supabase,
         kind,
@@ -230,8 +259,12 @@ def _send_code(
             "status": "email_sent",
         },
         ["pending", "email_sent"],
+        {"verification_code": verification.get("verification_code")},
     )
     if not updated:
+        latest = _get_owned(supabase, kind, verification_id, body.ledger_user_id, caller)
+        if _sent_recently(latest, utc_now()):
+            raise _resend_too_soon()
         raise _conflict()
 
     # テストデータ（DEV キー）はメールを送らず、コードを応答で返す
@@ -271,30 +304,44 @@ def _verify_email(
     body: VerifyCodeRequest,
     caller: LedgerApiCaller,
 ) -> dict:
-    verification = _get_owned(supabase, kind, verification_id, body.ledger_user_id, caller)
-
-    if verification["status"] != "email_sent":
-        raise _bad_request("確認コードを送信していない申請です")
-    attempts = verification.get("verification_attempts") or 0
-    if attempts >= MAX_CODE_ATTEMPTS:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="確認コードを続けて間違えたため無効になりました。再送信してください",
+    # 照合する前に試行回数を 1 増やす（読み取った回数のままのときだけ増やせる）。
+    # 同時に届いた要求で回数が失われないよう、競合したら読み直す。上限を超えて照合はさせない
+    for _ in range(MAX_CONCURRENT_RETRIES):
+        verification = _get_owned(
+            supabase, kind, verification_id, body.ledger_user_id, caller
         )
-    sent_at = parse_timestamp(verification.get("verification_code_sent_at"))
-    if not sent_at or utc_now() - sent_at > CODE_TTL:
-        raise _bad_request("確認コードの有効期限が切れています。再送信してください")
+        if verification["status"] != "email_sent":
+            raise _bad_request("確認コードを送信していない申請です")
+        attempts = verification.get("verification_attempts") or 0
+        if attempts >= MAX_CODE_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="確認コードを続けて間違えたため無効になりました。再送信してください",
+            )
+        sent_at = parse_timestamp(verification.get("verification_code_sent_at"))
+        if not sent_at or utc_now() - sent_at > CODE_TTL:
+            raise _bad_request("確認コードの有効期限が切れています。再送信してください")
 
-    if not code_matches(body.code, verification.get("verification_code")):
-        _update(
+        reserved = _update(
             supabase,
             kind,
             verification,
             {"verification_attempts": attempts + 1},
             ["email_sent"],
+            {
+                "verification_attempts": verification.get("verification_attempts"),
+                "verification_code": verification.get("verification_code"),
+            },
         )
+        if reserved:
+            break
+    else:
+        raise _conflict()
+
+    if not code_matches(body.code, verification.get("verification_code")):
         raise _bad_request("確認コードが正しくありません")
 
+    # 照合したコードが再送信で置き換えられていたら、確認済みにしない
     updated = _update(
         supabase,
         kind,
@@ -305,6 +352,7 @@ def _verify_email(
             "verification_code_verified_at": utc_now().isoformat(),
         },
         ["email_sent"],
+        {"verification_code": verification.get("verification_code")},
     )
     if not updated:
         raise _conflict()
@@ -364,7 +412,7 @@ def _verify_dns(
 
 
 @router.post("/politician-verifications", status_code=status.HTTP_201_CREATED)
-async def create_politician_verification(
+def create_politician_verification(
     body: PoliticianVerificationCreate,
     supabase: Client = Depends(get_admin_supabase_client_dep),
     caller: LedgerApiCaller = Depends(require_ledger_api_key),
@@ -388,7 +436,7 @@ async def create_politician_verification(
 
 
 @router.get("/politician-verifications/user/{ledger_user_id}")
-async def list_politician_verifications(
+def list_politician_verifications(
     ledger_user_id: UUID,
     supabase: Client = Depends(get_admin_supabase_client_dep),
     caller: LedgerApiCaller = Depends(require_ledger_api_key),
@@ -398,7 +446,7 @@ async def list_politician_verifications(
 
 
 @router.post("/politician-verifications/{verification_id}/send-verification")
-async def send_politician_verification_code(
+def send_politician_verification_code(
     verification_id: UUID,
     body: VerificationOwnerRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
@@ -409,7 +457,7 @@ async def send_politician_verification_code(
 
 
 @router.post("/politician-verifications/{verification_id}/verify-email")
-async def verify_politician_email(
+def verify_politician_email(
     verification_id: UUID,
     body: VerifyCodeRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
@@ -420,7 +468,7 @@ async def verify_politician_email(
 
 
 @router.post("/politician-verifications/{verification_id}/verify-dns")
-async def verify_politician_dns(
+def verify_politician_dns(
     verification_id: UUID,
     body: VerificationOwnerRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
@@ -436,7 +484,7 @@ async def verify_politician_dns(
 
 
 @router.post("/organization-manager-verifications", status_code=status.HTTP_201_CREATED)
-async def create_organization_manager_verification(
+def create_organization_manager_verification(
     body: OrganizationManagerVerificationCreate,
     supabase: Client = Depends(get_admin_supabase_client_dep),
     caller: LedgerApiCaller = Depends(require_ledger_api_key),
@@ -478,7 +526,7 @@ async def create_organization_manager_verification(
 
 
 @router.get("/organization-manager-verifications/user/{ledger_user_id}")
-async def list_organization_manager_verifications(
+def list_organization_manager_verifications(
     ledger_user_id: UUID,
     supabase: Client = Depends(get_admin_supabase_client_dep),
     caller: LedgerApiCaller = Depends(require_ledger_api_key),
@@ -488,7 +536,7 @@ async def list_organization_manager_verifications(
 
 
 @router.post("/organization-manager-verifications/{verification_id}/send-verification")
-async def send_organization_manager_verification_code(
+def send_organization_manager_verification_code(
     verification_id: UUID,
     body: VerificationOwnerRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
@@ -498,7 +546,7 @@ async def send_organization_manager_verification_code(
 
 
 @router.post("/organization-manager-verifications/{verification_id}/verify-email")
-async def verify_organization_manager_email(
+def verify_organization_manager_email(
     verification_id: UUID,
     body: VerifyCodeRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
@@ -508,7 +556,7 @@ async def verify_organization_manager_email(
 
 
 @router.post("/organization-manager-verifications/{verification_id}/verify-dns")
-async def verify_organization_manager_dns(
+def verify_organization_manager_dns(
     verification_id: UUID,
     body: VerificationOwnerRequest,
     supabase: Client = Depends(get_admin_supabase_client_dep),
