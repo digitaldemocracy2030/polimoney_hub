@@ -64,6 +64,11 @@ class FakeQuery:
         self.filters.append(lambda r: r.get(column) == value)
         return self
 
+    def gt(self, column, value):
+        # ISO 8601 の UTC の日時を想定（文字列のまま比べても順序が同じ）
+        self.filters.append(lambda r: r.get(column) is not None and r.get(column) > value)
+        return self
+
     def in_(self, column, values):
         self.filters.append(lambda r: r.get(column) in values)
         return self

@@ -9,10 +9,12 @@ from app.config import settings
 from app.core.admin_auth import require_admin_user
 from app.core.api_key import require_ledger_api_key
 from app.routers import (
+    admin_ledger_requests,
     admin_verifications,
     election_funds,
     elections,
     health,
+    ledger_requests,
     links,
     master,
     organizations,
@@ -240,9 +242,23 @@ app.include_router(
     dependencies=LEDGER_API_DEPENDENCIES,
 )
 
+# 登録申請（選挙・政治団体）と年度のロック解除申請（Ledger 向け）
+app.include_router(
+    ledger_requests.router,
+    prefix="/api/v1",
+    tags=["requests"],
+    dependencies=LEDGER_API_DEPENDENCIES,
+)
+
 # 管理者 API（Hub の Supabase Auth でログインし、admin_users に登録された人だけ）
 app.include_router(
     admin_verifications.router,
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_user)],
+)
+app.include_router(
+    admin_ledger_requests.router,
     prefix="/api/admin",
     tags=["admin"],
     dependencies=[Depends(require_admin_user)],

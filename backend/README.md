@@ -119,8 +119,29 @@ FastAPIにより自動生成されるAPIドキュメント：
 | `POST /api/v1/politician-elections`                 | 政治家 ↔ 選挙の紐付けを取得・作成（本人確認済みの政治家本人のみ）                          |
 | `POST /api/v1/politician-organizations/resolve`     | 政治団体の代表者の紐付けを引く（作成はしない）                                              |
 | `POST /api/v1/sync/*`, `GET /api/v1/sync/status`    | Ledger → Hub の公開データ同期                                                               |
+| `POST /api/v1/politician-verifications` ほか、`/api/v1/organization-manager-verifications/*` | 政治家・政治団体の管理者の本人確認（申請・確認コード・DNS） |
+| `POST /api/v1/election-requests`, `POST /api/v1/organization-requests` | 選挙・政治団体の登録申請（同じ申請者の同じ申請は、審査中は 1 件まで。重複は 409） |
+| `POST /api/v1/unlock-requests`                      | 年度のロック解除の申請（同じ台帳・年度の申請中は 1 件まで。重複は 409）                      |
+| `GET /api/v1/unlock-requests/check/{ledger_id}[?fiscal_year=]` | ロック解除の状態（承認済みで期限内なら `is_unlocked: true`、申請中の申請）       |
 
 政治家・政治団体・選挙・政治団体管理者は、API キーに応じて本番データかテストデータのどちらかだけを扱う（`app/utils/test_scope.py`）。
+
+### 管理者 API（`/api/admin/*`）
+
+`Authorization: Bearer <Hub の Supabase Auth のトークン>` で、`admin_users` に登録された有効な管理者だけが使える（`app/core/admin_auth.py`）。
+
+| メソッド・パス | 内容 |
+| --- | --- |
+| `GET /api/admin/me` | ログイン中の管理者 |
+| `GET /api/admin/{politician-verifications,organization-manager-verifications}[/{id}]` | 本人確認の申請の一覧・1 件 |
+| `POST /api/admin/{politician-verifications,organization-manager-verifications}/{id}/{approve,reject}` | 本人確認の承認・却下 |
+| `GET /api/admin/{election-requests,organization-requests,unlock-requests}[/{id}]` | 登録申請・ロック解除申請の一覧（`?status=`, `?is_test=`）・1 件 |
+| `POST /api/admin/election-requests/{id}/approve` | 選挙を作って承認（body の `election_id` を指定すると既存の選挙に紐付ける） |
+| `POST /api/admin/organization-requests/{id}/approve` | 政治団体を作って承認（body の `organization_id` を指定すると既存の団体に紐付ける） |
+| `POST /api/admin/unlock-requests/{id}/approve` | ロック解除を承認（body の `unlock_hours` の間解除。既定 168 時間、最大 720 時間） |
+| `POST /api/admin/{election-requests,organization-requests,unlock-requests}/{id}/reject` | 却下（body の `rejection_reason` は必須） |
+
+選挙・政治団体の承認は DB の関数（`db/migrate-request-review.sql`）で、マスタの行の作成と申請の更新を 1 つのトランザクションで行う。
 
 ## テスト実行
 
