@@ -5,6 +5,9 @@
 - アーカイブ済み（ロック済み）の年度の修正のため、Ledger の台帳の年度のロック解除を申請する。
   承認されると期限付きで解除される。Ledger は解除状態を GET /unlock-requests/check/{ledger_id} で確かめる
 - DEV キーの申請はテストデータ（is_test = true）として扱う
+- Hub は Ledger の台帳のメンバーを知らないので、台帳（ledger_id）への権限の確認は Ledger の API が
+  呼び出す前に行う（この API は Ledger 専用キーでだけ呼べる）。解除状態の照会は、
+  申請者のメールアドレスなどを含めず、解除状態の判断に必要な項目だけを返す
 - 「申請中は 1 件まで」は DB の部分一意インデックスで守る（db/migrate-request-review.sql）。違反は 409
 """
 
@@ -63,7 +66,10 @@ def _check_politician(
     ledger_user_id: UUID,
     caller: LedgerApiCaller,
 ) -> Optional[str]:
-    """申請者の政治家（本人の Ledger ユーザーに紐付いたもの）なら ID を返す。違えば 400"""
+    """申請者の政治家（本人の Ledger ユーザーに紐付いたもの）なら ID を返す。
+
+    他人の政治家・別の範囲（本番 / テスト）の政治家・存在しない政治家は区別せず 404
+    """
     if politician_id is None:
         return None
     try:
@@ -78,7 +84,7 @@ def _check_politician(
         raise server_error("申請者の政治家の確認に失敗しました", e) from e
     if not rows:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="申請者の政治家が見つかりません",
         )
     return str(politician_id)
@@ -214,15 +220,20 @@ def create_unlock_request(
     return {"data": row}
 
 
-def unlock_status(rows: list[dict], now: datetime) -> dict:
-    """ロック解除の申請の一覧（新しい順）から、解除中か・申請中の申請を求める"""
+# 解除状態の照会で返す承認済みの申請の列
+UNLOCK_REQUEST_FIELDS = ("id", "status", "fiscal_year", "approved_at", "unlock_expires_at")
+
+
+def unlock_status(
+    latest_approved: Optional[dict], latest_pending: Optional[dict], now: datetime
+) -> dict:
+    """期限が最も遅い承認と、最新の申請中の申請から、解除中かどうかを求める"""
     active = None
-    for row in rows:
-        expires_at = parse_timestamp(row.get("unlock_expires_at"))
-        if row.get("status") == "approved" and expires_at and expires_at > now:
-            active = row
-            break
-    pending = next((row for row in rows if row.get("status") == "pending"), None)
+    if latest_approved:
+        expires_at = parse_timestamp(latest_approved.get("unlock_expires_at"))
+        if expires_at and expires_at > now:
+            active = latest_approved
+    pending = latest_pending
     result: dict = {
         "is_unlocked": active is not None,
         "pending_request": (
@@ -237,7 +248,7 @@ def unlock_status(rows: list[dict], now: datetime) -> dict:
         ),
     }
     if active:
-        result["unlock_request"] = active
+        result["unlock_request"] = {key: active.get(key) for key in UNLOCK_REQUEST_FIELDS}
         result["expires_at"] = active["unlock_expires_at"]
     return result
 
@@ -249,18 +260,33 @@ def check_unlock_status(
     supabase: Client = Depends(get_admin_supabase_client_dep),
     caller: LedgerApiCaller = Depends(require_ledger_api_key),
 ):
-    """台帳（と年度）のロック解除の状態。承認済みで期限内の申請があれば解除中"""
-    try:
-        query = supabase.table(UNLOCK_REQUESTS).select("*").eq("ledger_id", str(ledger_id))
+    """台帳（と年度）のロック解除の状態。承認済みで期限内の申請があれば解除中
+
+    fiscal_year を指定しなければ、台帳のすべての年度の申請から求める。
+    承認と申請中の申請は別々に取得する（却下の履歴の件数に左右されないように）。
+    """
+
+    def latest(status_value: str, order_column: str) -> Optional[dict]:
+        query = (
+            supabase.table(UNLOCK_REQUESTS)
+            .select("*")
+            .eq("ledger_id", str(ledger_id))
+            .eq("status", status_value)
+        )
         if fiscal_year is not None:
             query = query.eq("fiscal_year", fiscal_year)
         rows = (
             apply_test_scope(query, caller)
-            .order("created_at", desc=True)
-            .limit(50)
+            .order(order_column, desc=True)
+            .limit(1)
             .execute()
             .data
         )
+        return rows[0] if rows else None
+
+    try:
+        latest_approved = latest("approved", "unlock_expires_at")
+        latest_pending = latest("pending", "created_at")
     except Exception as e:
         raise server_error("ロック解除の状態の取得に失敗しました", e) from e
-    return unlock_status(rows, datetime.now(timezone.utc))
+    return unlock_status(latest_approved, latest_pending, datetime.now(timezone.utc))

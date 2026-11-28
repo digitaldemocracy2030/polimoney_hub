@@ -7,7 +7,7 @@ from datetime import date
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ElectionRequestCreate(BaseModel):
@@ -76,3 +76,12 @@ class ApproveUnlockRequest(BaseModel):
 
 class RejectRequest(BaseModel):
     rejection_reason: str = Field(..., min_length=1, max_length=1000)
+
+    @field_validator("rejection_reason")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        """空白だけの理由は受け付けない（前後の空白は除いて保存する）"""
+        value = value.strip()
+        if not value:
+            raise ValueError("却下の理由を入力してください")
+        return value

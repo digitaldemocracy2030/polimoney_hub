@@ -151,7 +151,8 @@ def test_create_election_request_rejects_other_politician(client, politician):
         json=election_body(requested_by_politician_id=POLITICIAN_ID),
         headers=PROD,
     )
-    assert res.status_code == 400
+    # 他人・別の範囲の政治家は 404（存在を明かさない）
+    assert res.status_code == 404
     assert db.all("election_requests") == []
 
 
@@ -265,13 +266,34 @@ def test_check_unlock_status_scoped_to_test_data(client):
     assert res.json()["is_unlocked"] is True
 
 
-def test_unlock_status_ignores_expired_and_rejected():
+def test_unlock_status_ignores_expired():
     now = datetime.now(timezone.utc)
-    rows = [
-        {"id": "a", "status": "approved", "unlock_expires_at": (now - timedelta(hours=1)).isoformat()},
-        {"id": "b", "status": "rejected"},
+    expired = {"id": "a", "status": "approved", "unlock_expires_at": (now - timedelta(hours=1)).isoformat()}
+    assert unlock_status(expired, None, now) == {"is_unlocked": False, "pending_request": None}
+
+
+def test_check_unlock_status_not_hidden_by_many_rejections(client):
+    rejected = [
+        {
+            "id": f"r{i}", "ledger_id": LEDGER_ID, "fiscal_year": 2025, "status": "rejected",
+            "is_test": False, "created_at": "2026-11-27T00:00:00+00:00",
+        }
+        for i in range(60)
     ]
-    assert unlock_status(rows, now) == {"is_unlocked": False, "pending_request": None}
+    approved = {
+        "id": "a1", "ledger_id": LEDGER_ID, "fiscal_year": 2025, "status": "approved",
+        "unlock_expires_at": hours_from_now(24), "is_test": False,
+        "requested_by_email": "user@example.org", "reason": "修正したい理由がある",
+        "created_at": "2026-11-20T00:00:00+00:00",
+    }
+    use(FakeDB(unlock_requests=rejected + [approved]))
+    res = client.get(f"/api/v1/unlock-requests/check/{LEDGER_ID}?fiscal_year=2025", headers=PROD)
+    data = res.json()
+    assert data["is_unlocked"] is True
+    # 申請者のメールアドレスなどは返さない
+    assert set(data["unlock_request"]) == {
+        "id", "status", "fiscal_year", "approved_at", "unlock_expires_at"
+    }
 
 
 # ============================================
@@ -358,6 +380,17 @@ def test_admin_reject_election_request(client):
     assert row["status"] == "rejected"
     assert row["reviewed_by"] == ADMIN_ID
     assert row["rejection_reason"] == "既に登録済みの選挙です"
+
+
+def test_admin_reject_requires_non_blank_reason(client):
+    request_id = "55555555-5555-5555-5555-555555555555"
+    db = use(FakeDB(election_requests=[{"id": request_id, "status": "pending"}]))
+    res = client.post(
+        f"/api/admin/election-requests/{request_id}/reject",
+        json={"rejection_reason": "   "},
+    )
+    assert res.status_code == 422
+    assert db.all("election_requests")[0]["status"] == "pending"
 
 
 def test_admin_reject_closed_request_is_conflict(client):
