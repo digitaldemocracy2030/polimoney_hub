@@ -266,6 +266,8 @@ def check_unlock_status(
     承認と申請中の申請は別々に取得する（却下の履歴の件数に左右されないように）。
     """
 
+    now = datetime.now(timezone.utc)
+
     def latest(status_value: str, order_column: str) -> Optional[dict]:
         query = (
             supabase.table(UNLOCK_REQUESTS)
@@ -273,6 +275,9 @@ def check_unlock_status(
             .eq("ledger_id", str(ledger_id))
             .eq("status", status_value)
         )
+        if status_value == "approved":
+            # 期限内の承認だけ（期限が NULL の行は降順で先頭に来るので除く）
+            query = query.gt("unlock_expires_at", now.isoformat())
         if fiscal_year is not None:
             query = query.eq("fiscal_year", fiscal_year)
         rows = (
@@ -289,4 +294,4 @@ def check_unlock_status(
         latest_pending = latest("pending", "created_at")
     except Exception as e:
         raise server_error("ロック解除の状態の取得に失敗しました", e) from e
-    return unlock_status(latest_approved, latest_pending, datetime.now(timezone.utc))
+    return unlock_status(latest_approved, latest_pending, now)

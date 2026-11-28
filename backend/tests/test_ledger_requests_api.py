@@ -272,6 +272,27 @@ def test_unlock_status_ignores_expired():
     assert unlock_status(expired, None, now) == {"is_unlocked": False, "pending_request": None}
 
 
+def test_check_unlock_status_ignores_approval_without_expiry(client):
+    use(
+        FakeDB(
+            unlock_requests=[
+                {
+                    "id": "n1", "ledger_id": LEDGER_ID, "fiscal_year": 2025, "status": "approved",
+                    "unlock_expires_at": None, "is_test": False,
+                },
+                {
+                    "id": "a1", "ledger_id": LEDGER_ID, "fiscal_year": 2025, "status": "approved",
+                    "unlock_expires_at": hours_from_now(24), "is_test": False,
+                },
+            ]
+        )
+    )
+    res = client.get(f"/api/v1/unlock-requests/check/{LEDGER_ID}?fiscal_year=2025", headers=PROD)
+    data = res.json()
+    assert data["is_unlocked"] is True
+    assert data["unlock_request"]["id"] == "a1"
+
+
 def test_check_unlock_status_not_hidden_by_many_rejections(client):
     rejected = [
         {
